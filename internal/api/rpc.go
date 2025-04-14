@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type Dependencies interface{}
+type Dependencies any
 
 type InitT[D Dependencies] func(context.Context) (D, error)
 type HandlerT[I Message, O any, D Dependencies] func(context.Context, I, D) (*O, error)
@@ -136,6 +136,7 @@ func Handler[I Message, O any, D Dependencies](initDeps InitT[D], handler Handle
 
 type Translator[O Message] func(io.ReadCloser) (O, error)
 
+// Translate applies a Translator on the Request.Body to populate the Request.URL params.
 func Translate[O Message](t Translator[O], h http.HandlerFunc) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		m, err := t(r.Body)
@@ -150,7 +151,11 @@ func Translate[O Message](t Translator[O], h http.HandlerFunc) http.HandlerFunc 
 			http.Error(rw, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
-		r.Body = io.NopCloser(strings.NewReader(values.Encode()))
+		r.Body = io.NopCloser(strings.NewReader(""))
+		r.PostForm = nil
+		r.Form = nil
+		r.URL.RawQuery = values.Encode()
+		r.ParseForm()
 		h(rw, r)
 	}
 }

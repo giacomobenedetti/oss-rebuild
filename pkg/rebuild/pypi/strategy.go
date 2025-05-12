@@ -41,17 +41,16 @@ func (b *PureWheelBuild) ToWorkflow() *rebuild.WorkflowStrategy {
 		Deps: []flow.Step{{
 			Uses: "pypi/deps/basic",
 			With: map[string]string{
-				"registryTime":  registryTime,
-				"requirements":  flow.MustToJSON(b.Requirements),
-				"pythonVersion": b.PythonVersion,
-				"venv":          "deps",
+				"registryTime": registryTime,
+				"requirements": flow.MustToJSON(b.Requirements),
+				"venv":         "/deps",
 			},
 		}},
 		Build: []flow.Step{{
 			Uses: "pypi/build/wheel",
 			With: map[string]string{
 				"dir":     b.Location.Dir,
-				"locator": "deps/bin/",
+				"locator": "/deps/bin/",
 			},
 		}},
 		OutputDir: "dist",
@@ -164,6 +163,39 @@ var toolkit = []*flow.Tool{
 	{
 		Name: "pypi/deps/basic",
 		Steps: []flow.Step{
+			//{
+			//	Uses: "pypi/setup-python",
+			//	With: map[string]string{
+			//		"version": "{{.With.pythonVersion}}",
+			//	},
+			//},
+			{
+				Uses: "pypi/setup-venv",
+				With: map[string]string{
+					"locator": "/usr/bin/",
+					//"locator": "/root/.pyenv/versions/{{.With.pythonVersion}}/bin/",
+					"path": "{{.With.venv}}",
+				},
+			},
+			{
+				Uses: "pypi/setup-registry",
+				With: map[string]string{
+					"registryTime": "{{.With.registryTime}}",
+				},
+			},
+			{
+				Uses: "pypi/install-deps",
+				With: map[string]string{
+					"requirements": "{{.With.requirements}}",
+					"locator":      "{{.With.venv}}/bin/",
+				},
+			},
+		},
+	},
+
+	{
+		Name: "pypi/deps/pyenv",
+		Steps: []flow.Step{
 			{
 				Uses: "pypi/setup-python",
 				With: map[string]string{
@@ -173,7 +205,7 @@ var toolkit = []*flow.Tool{
 			{
 				Uses: "pypi/setup-venv",
 				With: map[string]string{
-					// "locator": "/usr/bin/",
+					//"locator": "/usr/bin/",
 					"locator": "/root/.pyenv/versions/{{.With.pythonVersion}}/bin/",
 					"path":    "{{.With.venv}}",
 				},
@@ -198,14 +230,6 @@ var toolkit = []*flow.Tool{
 		Steps: []flow.Step{{
 			Runs: textwrap.Dedent(`
 				{{.With.locator}}python3 -m build --wheel -n{{if and (ne .With.dir ".") (ne .With.dir "")}} {{.With.dir}}{{end}}`)[1:],
-			Needs: []string{"python3"},
-		}},
-	},
-	{
-		Name: "pypi/build/sdist",
-		Steps: []flow.Step{{
-			Runs: textwrap.Dedent(`
-				{{.With.locator}}python3 -m build --sdist -n{{if and (ne .With.dir ".") (ne .With.dir "")}} {{.With.dir}}{{end}}`)[1:],
 			Needs: []string{"python3"},
 		}},
 	},

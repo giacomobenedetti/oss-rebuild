@@ -41,16 +41,17 @@ func (b *PureWheelBuild) ToWorkflow() *rebuild.WorkflowStrategy {
 		Deps: []flow.Step{{
 			Uses: "pypi/deps/basic",
 			With: map[string]string{
-				"registryTime": registryTime,
-				"requirements": flow.MustToJSON(b.Requirements),
-				"venv":         "/deps",
+				"registryTime":  registryTime,
+				"requirements":  flow.MustToJSON(b.Requirements),
+				"pythonVersion": b.PythonVersion,
+				"venv":          "deps",
 			},
 		}},
 		Build: []flow.Step{{
 			Uses: "pypi/build/wheel",
 			With: map[string]string{
 				"dir":     b.Location.Dir,
-				"locator": "/deps/bin/",
+				"locator": "deps/bin/",
 			},
 		}},
 		OutputDir: "dist",
@@ -102,16 +103,6 @@ func init() {
 	}
 }
 
-// if ! command -v pyenv &> /dev/null; then
-//
-//		curl https://raw.githubusercontent.com/pyenv/pyenv-installer/master/bin/pyenv-installer | bash
-//		export PATH="/root/.pyenv/bin:$PATH"
-//		eval "$(pyenv init -)"
-//		eval "$(pyenv virtualenv-init -)"
-//	fi
-//
-// /root/.pyenv/bin/pyenv global {{.With.version}}`)[1:],
-// "bash", "clang", "curl", "build-base", "patch", "zip", "zlib-dev", "libffi-dev", "linux-headers", "readline-dev", "openssl", "openssl-dev", "sqlite-dev", "bzip2-dev"
 // Base tools for individual operations
 var toolkit = []*flow.Tool{
 	//  Use clang to avoid issues with openssl
@@ -230,6 +221,14 @@ var toolkit = []*flow.Tool{
 		Steps: []flow.Step{{
 			Runs: textwrap.Dedent(`
 				{{.With.locator}}python3 -m build --wheel -n{{if and (ne .With.dir ".") (ne .With.dir "")}} {{.With.dir}}{{end}}`)[1:],
+			Needs: []string{"python3"},
+		}},
+	},
+	{
+		Name: "pypi/build/sdist",
+		Steps: []flow.Step{{
+			Runs: textwrap.Dedent(`
+				{{.With.locator}}python3 -m build --sdist -n{{if and (ne .With.dir ".") (ne .With.dir "")}} {{.With.dir}}{{end}}`)[1:],
 			Needs: []string{"python3"},
 		}},
 	},

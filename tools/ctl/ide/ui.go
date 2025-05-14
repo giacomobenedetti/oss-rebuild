@@ -65,6 +65,9 @@ func NewTuiApp(dex rundex.Reader, rundexOpts rundex.FetchRebuildOpts, benches be
 	if err := cmdReg.AddGlobals(commands.NewGlobalCmds(t.app, t.rb, modalFn, butler, asst, buildDefs, dex, benches)...); err != nil {
 		log.Fatal(err)
 	}
+	if err := cmdReg.AddRebuildGroups(commands.NewRebuildGroupCmds(t.app, t.rb, modalFn, butler, asst, buildDefs, dex, benches)...); err != nil {
+		log.Fatal(err)
+	}
 	if err := cmdReg.AddRebuilds(commands.NewRebuildCmds(t.app, t.rb, modalFn, butler, asst, buildDefs, dex, benches)...); err != nil {
 		log.Fatal(err)
 	}
@@ -88,6 +91,16 @@ func NewTuiApp(dex rundex.Reader, rundexOpts rundex.FetchRebuildOpts, benches be
 			Hotkey: 'v',
 			Func: func(_ context.Context) {
 				t.logs.ScrollToEnd()
+			},
+		},
+		{
+			Short:  "refresh",
+			Hotkey: 'f',
+			Func: func(ctx context.Context) {
+				if err := t.explorer.LoadTree(ctx); err != nil {
+					log.Println(err)
+					return
+				}
 			},
 		},
 	}...)
@@ -130,7 +143,7 @@ func NewTuiApp(dex rundex.Reader, rundexOpts rundex.FetchRebuildOpts, benches be
 		window := tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(mainPane, flexed, unit, focused).
 			AddItem(bottomBar, 1, 0, !focused) // bottomBar is non-flexed, fixed height 1
-		window.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		t.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			if event.Key() == tcell.KeyCtrlC {
 				// Clean up the rebuilder docker container.
 				t.rb.Kill()

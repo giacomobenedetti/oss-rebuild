@@ -84,15 +84,13 @@ func (r Rebuild) WasSmoketest() bool {
 // Run represents a group of one or more rebuild executions.
 type Run struct {
 	schema.Run
-	Type    schema.ExecutionMode
-	Created time.Time
+	Type schema.ExecutionMode
 }
 
 func FromRun(r schema.Run) Run {
 	var rb Run
 	rb.Run = r
 	rb.Type = schema.ExecutionMode(r.Type)
-	rb.Created = r.Created
 	return rb
 }
 
@@ -305,8 +303,31 @@ func filterRebuilds(all <-chan Rebuild, req *FetchRebuildRequest) []Rebuild {
 	}
 	return res
 }
+
 func sanitize(key string) string {
 	return strings.ReplaceAll(key, "/", "!")
+}
+
+func (f *FirestoreClient) findArtifactName(ctx context.Context, t rebuild.Target) (string, error) {
+	iter := f.Client.Collection(path.Join("ecosystem", string(t.Ecosystem), "packages", sanitize(t.Package), "versions", t.Version, "artifacts")).DocumentRefs(ctx)
+	var artifacts []string
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		artifacts = append(artifacts, doc.ID)
+	}
+	if len(artifacts) == 0 {
+		return "", errors.New("no artifact documents found")
+	}
+	if len(artifacts) > 1 {
+		return "", errors.New("multiple artifact documents found")
+	}
+	return artifacts[0], nil
 }
 
 // FetchRebuilds fetches the Rebuild objects out of firestore.
@@ -319,10 +340,14 @@ func (f *FirestoreClient) FetchRebuilds(ctx context.Context, req *FetchRebuildRe
 	}
 	q := f.Client.CollectionGroup("attempts").Query
 	if req.Target != nil {
-		if req.Target.Artifact == "" {
-			return nil, errors.New("target missing artifact name")
+		t := *req.Target
+		if t.Artifact == "" {
+			if a, err := f.findArtifactName(ctx, t); err != nil {
+				return nil, errors.Wrap(err, "inferring missing artifact")
+			} else {
+				t.Artifact = a
+			}
 		}
-		t := req.Target
 		q = f.Client.Collection(path.Join("ecosystem", string(t.Ecosystem), "packages", sanitize(t.Package), "versions", t.Version, "artifacts", t.Artifact, "attempts")).Query
 	}
 	if len(req.Executors) != 0 {

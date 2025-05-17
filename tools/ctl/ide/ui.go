@@ -35,7 +35,7 @@ type TuiApp struct {
 }
 
 // NewTuiApp creates a new tuiApp object.
-func NewTuiApp(dex rundex.Reader, rundexOpts rundex.FetchRebuildOpts, benches benchmark.Repository, buildDefs rebuild.LocatableAssetStore, butler localfiles.Butler, asst assistant.Assistant) *TuiApp {
+func NewTuiApp(dex rundex.Reader, watcher rundex.Watcher, rundexOpts rundex.FetchRebuildOpts, benches benchmark.Repository, buildDefs rebuild.LocatableAssetStore, butler localfiles.Butler, asst assistant.Assistant) *TuiApp {
 	var t *TuiApp
 	{
 		app := tview.NewApplication()
@@ -107,7 +107,7 @@ func NewTuiApp(dex rundex.Reader, rundexOpts rundex.FetchRebuildOpts, benches be
 	if err != nil {
 		log.Fatal(err)
 	}
-	t.explorer = explorer.NewExplorer(t.app, modalFn, dex, rundexOpts, benches, cmdReg)
+	t.explorer = explorer.NewExplorer(t.app, modalFn, dex, watcher, rundexOpts, benches, cmdReg)
 	gcmds := cmdReg.GlobalCommands()
 	inst := make([]string, 0, len(gcmds))
 	for _, cmd := range gcmds {
@@ -143,17 +143,20 @@ func NewTuiApp(dex rundex.Reader, rundexOpts rundex.FetchRebuildOpts, benches be
 		window := tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(mainPane, flexed, unit, focused).
 			AddItem(bottomBar, 1, 0, !focused) // bottomBar is non-flexed, fixed height 1
-		t.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-			if event.Key() == tcell.KeyCtrlC {
-				// Clean up the rebuilder docker container.
-				t.rb.Kill()
-				return event
-			}
+		window.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			for _, cmd := range gcmds {
 				if cmd.Hotkey != 0 && event.Rune() == cmd.Hotkey {
 					go cmd.Func(context.Background())
 					return nil
 				}
+			}
+			return event
+		})
+		t.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if event.Key() == tcell.KeyCtrlC {
+				// Clean up the rebuilder docker container.
+				t.rb.Kill()
+				return event
 			}
 			return event
 		})

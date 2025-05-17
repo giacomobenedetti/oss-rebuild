@@ -148,6 +148,7 @@ var tui = &cobra.Command{
 			}
 		}
 		var dex rundex.Reader
+		var watcher rundex.Watcher
 		{
 			// Prefer the firestore based rundex where possible, local otherwise.
 			// NOTE: We may eventually want to support firestore as a starting point, then local for quick debugging after that.
@@ -158,7 +159,9 @@ var tui = &cobra.Command{
 					log.Fatal(err)
 				}
 			} else {
-				dex = rundex.NewLocalClient(localfiles.Rundex())
+				lc := rundex.NewLocalClient(localfiles.Rundex())
+				dex = lc
+				watcher = lc
 			}
 		}
 		var buildDefs *rebuild.FilesystemAssetStore
@@ -182,13 +185,17 @@ var tui = &cobra.Command{
 			PyPI:     pypireg.HTTPRegistry{Client: regclient},
 		}
 		butler := localfiles.NewButler(*metadataBucket, *logsBucket, *debugStorage, mux)
-		aiClient, err := genai.NewClient(cmd.Context(), *llmProject, "us-central1")
+		aiProject := *project
+		if *llmProject != "" {
+			aiProject = *llmProject
+		}
+		aiClient, err := genai.NewClient(cmd.Context(), aiProject, "us-central1")
 		if err != nil {
 			log.Fatal(errors.Wrap(err, "failed to create a genai client"))
 		}
 		asst := assistant.NewAssistant(butler, aiClient)
 		benches := benchmark.NewFSRepository(osfs.New(*benchmarkDir))
-		tapp := ide.NewTuiApp(dex, rundex.FetchRebuildOpts{Clean: *clean}, benches, buildDefs, butler, asst)
+		tapp := ide.NewTuiApp(dex, watcher, rundex.FetchRebuildOpts{Clean: *clean}, benches, buildDefs, butler, asst)
 		if err := tapp.Run(cmd.Context()); err != nil {
 			// TODO: This cleanup will be unnecessary once NewTuiApp does split logging.
 			log.Default().SetOutput(os.Stdout)
@@ -831,7 +838,7 @@ var (
 	// TUI
 	benchmarkDir = flag.String("benchmark-dir", "", "a directory with benchmarks to work with")
 	defDir       = flag.String("def-dir", "", "tui will make edits to strategies in this manual build definition repo")
-	llmProject   = flag.String("llm-project", "", "the GCP project to use for LLM execution")
+	llmProject   = flag.String("llm-project", "", "if provided, the GCP project to prefer over --project for use with the Vertext AI API")
 	// Migrate
 	dryrun = flag.Bool("dryrun", false, "true if this migration is a dryrun")
 )

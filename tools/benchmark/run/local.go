@@ -74,11 +74,11 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 			wheel, err := pypi.FindPureWheel(release.Artifacts)
 			if err != nil {
 				// TODO: requires PR #468
-				//wheel, err = pypi.FindSourceDistribution(release.Artifacts)
-				//if err != nil {
-				verdict.Message = err.Error()
-				return verdict, nil
-				//}
+				wheel, err = pypi.FindSourceDistribution(release.Artifacts)
+				if err != nil {
+					verdict.Message = err.Error()
+					return verdict, nil
+				}
 			}
 			t.Artifact = wheel.Filename
 		case rebuild.CratesIO:
@@ -174,15 +174,13 @@ func (s *localExecutionService) build(ctx context.Context, t rebuild.Target, str
 		}
 	}
 
-	logw, err := out.Writer(ctx, rebuild.DebugLogsAsset.For(t))
-	if err != nil {
-		return err
-	}
-	defer logw.Close()
+	defer func() {
+		logw, _ := out.Writer(ctx, rebuild.DebugLogsAsset.For(t))
 
-	if _, err := io.Copy(logw, outb); err != nil {
-		return err
-	}
+		defer logw.Close()
+
+		_, _ = io.Copy(logw, outb)
+	}()
 
 	return nil
 }

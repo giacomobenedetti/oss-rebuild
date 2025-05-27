@@ -7,6 +7,7 @@ package schema
 
 import (
 	"encoding/hex"
+	"github.com/google/oss-rebuild/internal/httpx"
 	"time"
 
 	"github.com/google/oss-rebuild/internal/api"
@@ -176,7 +177,7 @@ func (req SmoketestRequest) ToInputs() ([]rebuild.Input, error) {
 
 type Verdict struct {
 	Target        rebuild.Target
-	Message       string
+	Message       []string
 	StrategyOneof StrategyOneOf
 	Timings       rebuild.Timings
 }
@@ -189,15 +190,16 @@ type SmoketestResponse struct {
 
 // RebuildPackageRequest is a single request to the rebuild package endpoint.
 type RebuildPackageRequest struct {
-	Ecosystem         rebuild.Ecosystem `form:",required"`
-	Package           string            `form:",required"`
-	Version           string            `form:",required"`
-	Artifact          string            `form:""`
-	ID                string            `form:",required"`
-	UseRepoDefinition bool              `form:""`
-	UseSyscallMonitor bool              `form:""`
-	UseNetworkProxy   bool              `form:""`
-	BuildTimeout      time.Duration     `form:""`
+	Ecosystem         rebuild.Ecosystem   `form:",required"`
+	Package           string              `form:",required"`
+	Version           string              `form:",required"`
+	Artifact          string              `form:""`
+	ID                string              `form:",required"`
+	UseRepoDefinition bool                `form:""`
+	UseSyscallMonitor bool                `form:""`
+	UseNetworkProxy   bool                `form:""`
+	BuildTimeout      time.Duration       `form:""`
+	RegClient         *httpx.CachedClient `form:""`
 }
 
 var _ api.Message = RebuildPackageRequest{}
@@ -256,7 +258,7 @@ type RebuildAttempt struct {
 	Version         string          `firestore:"version,omitempty"`
 	Artifact        string          `firestore:"artifact,omitempty"`
 	Success         bool            `firestore:"success,omitempty"`
-	Message         string          `firestore:"message,omitempty"`
+	Message         []string        `firestore:"message,omitempty"`
 	Strategy        StrategyOneOf   `firestore:"strategyoneof,omitempty"`
 	Dockerfile      string          `firestore:"dockerfile,omitempty"`
 	Timings         rebuild.Timings `firestore:"timings,omitempty"`

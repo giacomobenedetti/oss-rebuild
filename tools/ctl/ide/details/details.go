@@ -5,6 +5,7 @@ package details
 
 import (
 	"bytes"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/google/oss-rebuild/pkg/rebuild/rebuild"
@@ -32,7 +33,7 @@ func Format(example rundex.Rebuild) (string, error) {
 	enc.SetIndent(2)
 	err := enc.Encode(deets{
 		Success:  example.Success,
-		Message:  example.Message,
+		Message:  strings.Join(example.Message, ", "),
 		Timings:  example.Timings,
 		Strategy: example.Strategy,
 	})

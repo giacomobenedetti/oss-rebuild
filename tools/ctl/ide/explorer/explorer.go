@@ -31,7 +31,7 @@ const (
 )
 
 func verdictAsEmoji(r rundex.Rebuild) string {
-	if r.Success || r.Message == "" {
+	if r.Success || len(r.Message) < 1 {
 		return "✅"
 	} else {
 		return "❌"
@@ -434,24 +434,27 @@ func (e *Explorer) handleRebuildUpdate(r *rundex.Rebuild) error {
 		return nil
 	}
 	// TODO: Update the verdict group's stats (percent, count)
-	vg, added := findOrAdd(runNode, r.Message, func() *tview.TreeNode {
-		return e.makeVerdictGroupNode(&rundex.VerdictGroup{Msg: r.Message, Count: 1, Examples: nil}, 100*float32(1)/float32(len(runNodeData.Rebuilds)))
-	})
-	vgData, ok := vg.GetReference().(*nodeData)
-	if !ok {
-		return errors.Errorf("Verdict group node missing reference")
+	for _, m := range r.Message {
+		vg, added := findOrAdd(runNode, m, func() *tview.TreeNode {
+			return e.makeVerdictGroupNode(&rundex.VerdictGroup{Msg: m, Count: 1, Examples: nil}, 100*float32(1)/float32(len(runNodeData.Rebuilds)))
+		})
+		vgData, ok := vg.GetReference().(*nodeData)
+		if !ok {
+			return errors.Errorf("Verdict group node missing reference")
+		}
+		vgData.Rebuilds = append(vgData.Rebuilds, r)
+		if len(vg.GetChildren()) == 0 {
+			// TOOD: Update the other verdict group's percentages
+			return nil
+		}
+		if added {
+			return nil
+		}
+		findOrAdd(vg, r.ID(), func() *tview.TreeNode {
+			return e.makeExampleNode(*r)
+		})
 	}
-	vgData.Rebuilds = append(vgData.Rebuilds, r)
-	if len(vg.GetChildren()) == 0 {
-		// TOOD: Update the other verdict group's percentages
-		return nil
-	}
-	if added {
-		return nil
-	}
-	findOrAdd(vg, r.ID(), func() *tview.TreeNode {
-		return e.makeExampleNode(*r)
-	})
+
 	return nil
 }
 

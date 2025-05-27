@@ -50,7 +50,7 @@ func NewRebuildFromVerdict(v schema.Verdict, executor string, runID string, crea
 			Package:         v.Target.Package,
 			Version:         v.Target.Version,
 			Artifact:        v.Target.Artifact,
-			Success:         v.Message == "",
+			Success:         len(v.Message) < 1,
 			Message:         v.Message,
 			Strategy:        v.StrategyOneof,
 			Timings:         v.Timings,
@@ -269,27 +269,44 @@ func filterRebuilds(all <-chan Rebuild, req *FetchRebuildRequest) []Rebuild {
 	}
 	if req.Opts.Prefix != "" {
 		p = p.Do(func(in Rebuild, out chan<- Rebuild) {
-			if strings.HasPrefix(in.Message, req.Opts.Prefix) {
-				out <- in
+			for _, m := range in.Message {
+				if strings.HasPrefix(m, req.Opts.Prefix) {
+					out <- in
+					break
+				}
 			}
+
 		})
 	}
 	if req.Opts.Pattern != "" {
 		pat := regexp.MustCompile(req.Opts.Pattern)
 		p = p.Do(func(in Rebuild, out chan<- Rebuild) {
-			if pat.MatchString(in.Message) {
-				out <- in
+			for _, m := range in.Message {
+				if pat.MatchString(m) {
+					out <- in
+					break
+				}
 			}
+
 		})
 	}
 	if req.Opts.Clean {
 		p = p.Do(func(in Rebuild, out chan<- Rebuild) {
-			in.Message = cleanVerdict(in.Message)
+			var cleaned []string
+			for _, m := range in.Message {
+				cleaned = append(cleaned, cleanVerdict(m))
+			}
+			in.Message = cleaned
 			out <- in
+
 		})
 	}
 	p = p.Do(func(in Rebuild, out chan<- Rebuild) {
-		in.Message = strings.ReplaceAll(in.Message, "\n", "\\n")
+		var replaced []string
+		for _, m := range in.Message {
+			replaced = append(replaced, strings.ReplaceAll(m, "\n", "\\n"))
+		}
+		in.Message = replaced
 		out <- in
 	})
 	var res []Rebuild
@@ -437,7 +454,8 @@ func (f *LocalClient) FetchRuns(ctx context.Context, opts FetchRunsOpts) ([]Run,
 		defer file.Close()
 		var r Run
 		if err := json.NewDecoder(file).Decode(&r); err != nil {
-			return errors.Wrap(err, "decoding run file")
+			return nil
+			//return errors.Wrap(err, "decoding run file")
 		}
 		if len(opts.IDs) != 0 && !slices.Contains(opts.IDs, r.ID) {
 			return nil
@@ -564,11 +582,13 @@ type VerdictGroup struct {
 func GroupRebuilds(rebuilds []Rebuild) (byCount []*VerdictGroup) {
 	msgs := make(map[string]*VerdictGroup)
 	for _, r := range rebuilds {
-		if _, seen := msgs[r.Message]; !seen {
-			msgs[r.Message] = &VerdictGroup{Msg: r.Message}
+		for _, m := range r.Message {
+			if _, seen := msgs[m]; !seen {
+				msgs[m] = &VerdictGroup{Msg: m}
+			}
+			msgs[m].Count++
+			msgs[m].Examples = append(msgs[m].Examples, r)
 		}
-		msgs[r.Message].Count++
-		msgs[r.Message].Examples = append(msgs[r.Message].Examples, r)
 	}
 	for _, vg := range msgs {
 		slices.SortFunc(vg.Examples, func(a, b Rebuild) int {

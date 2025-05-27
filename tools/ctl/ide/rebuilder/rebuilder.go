@@ -224,7 +224,7 @@ func (rb *Rebuilder) RunLocal(ctx context.Context, r rundex.Rebuild, opts RunLoc
 		return
 	}
 	msg := "FAILED"
-	if len(resp.Verdicts) == 1 && resp.Verdicts[0].Message == "" {
+	if len(resp.Verdicts) == 1 && len(resp.Verdicts[0].Message) < 1 {
 		msg = "SUCCESS"
 	}
 	log.Printf("Smoketest %s:\n%v", msg, resp)

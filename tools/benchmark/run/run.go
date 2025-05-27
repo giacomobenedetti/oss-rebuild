@@ -146,7 +146,7 @@ func (w *attestWorker) ProcessOne(ctx context.Context, p benchmark.Package, out 
 					Version:   v,
 					Artifact:  artifact,
 				},
-				Message: err.Error(),
+				Message: []string{err.Error()},
 			}
 		} else {
 			out <- *verdict
@@ -165,6 +165,19 @@ func (w *smoketestWorker) Setup(ctx context.Context) {
 }
 
 func (w *smoketestWorker) ProcessOne(ctx context.Context, p benchmark.Package, out chan schema.Verdict) {
+	ch := w.limiters[p.Ecosystem]
+	fmt.Printf("Channel %p: cap=%d, len=%d\n", ch, cap(ch), len(ch))
+
+	// Try non-blocking read first
+	select {
+	case val := <-ch:
+		fmt.Printf("Got value immediately: %v\n", val)
+		// Continue with val
+	default:
+		fmt.Println("Would block - this shouldn't happen if channel has data!")
+		// Now try the blocking read
+		<-ch
+	}
 	<-w.limiters[p.Ecosystem]
 	req := schema.SmoketestRequest{
 		Ecosystem: rebuild.Ecosystem(p.Ecosystem),
@@ -182,7 +195,7 @@ func (w *smoketestWorker) ProcessOne(ctx context.Context, p benchmark.Package, o
 					Package:   p.Name,
 					Version:   v,
 				},
-				Message: errMsg,
+				Message: []string{errMsg},
 			}
 		}
 		return

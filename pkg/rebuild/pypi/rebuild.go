@@ -41,8 +41,9 @@ var (
 	verdictContentDiff     = errors.New("content differences found")
 )
 
-func CompareTwoFiles(csRB, csUP *archive.ContentSummary) (verdict error, err error) {
+func CompareTwoFiles(csRB, csUP *archive.ContentSummary) (verdict []error, err error) {
 	upOnly, diffs, rbOnly := csUP.Diff(csRB)
+	var verdicts []error
 	log.Println(upOnly, diffs, rbOnly)
 	var foundDSStore bool
 	for _, f := range upOnly {
@@ -54,24 +55,29 @@ func CompareTwoFiles(csRB, csUP *archive.ContentSummary) (verdict error, err err
 	for _, f := range diffs {
 		onlyMetadataDiffs = onlyMetadataDiffs && strings.Contains(f, ".dist-info/")
 	}
-	switch {
-	case foundDSStore:
-		return verdictDSStore, nil
-	case csUP.CRLFCount > csRB.CRLFCount:
-		return verdictLineEndings, nil
-	case len(upOnly) > 0 && len(rbOnly) > 0:
-		return verdictMismatchedFiles, nil
-	case len(upOnly) > 0:
-		return verdictUpstreamOnly, nil
-	case len(rbOnly) > 0:
-		return verdictRebuildOnly, nil
-	case onlyMetadataDiffs:
-		return verdictWheelDiff, nil
-	case len(diffs) > 0:
-		return verdictContentDiff, nil
-	default:
-		return nil, nil
+
+	if foundDSStore {
+		verdicts = append(verdicts, verdictDSStore)
 	}
+	if csUP.CRLFCount > csRB.CRLFCount {
+		verdicts = append(verdicts, verdictLineEndings)
+	}
+	if len(upOnly) > 0 && len(rbOnly) > 0 {
+		verdicts = append(verdicts, verdictMismatchedFiles)
+	}
+	if len(upOnly) > 0 {
+		verdicts = append(verdicts, verdictUpstreamOnly)
+	}
+	if len(rbOnly) > 0 {
+		verdicts = append(verdicts, verdictRebuildOnly)
+	}
+	if onlyMetadataDiffs {
+		verdicts = append(verdicts, verdictWheelDiff)
+	}
+	if len(diffs) > 0 {
+		verdicts = append(verdicts, verdictContentDiff)
+	}
+	return verdicts, nil
 }
 
 func (Rebuilder) Compare(ctx context.Context, t rebuild.Target, rb, up rebuild.Asset, assets rebuild.AssetStore, _ rebuild.Instructions) (verdict error, err error) {
@@ -79,12 +85,12 @@ func (Rebuilder) Compare(ctx context.Context, t rebuild.Target, rb, up rebuild.A
 	if err != nil {
 		return nil, errors.Wrapf(err, "summarizing assets")
 	}
-	verdict, err = CompareTwoFiles(csRB, csUP)
+	comparison, err := CompareTwoFiles(csRB, csUP)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to compare %v to %v", rb, up)
 	}
 	log.Printf("Verdict for %s: %v", rb.Target.Artifact, verdict)
-	return verdict, nil
+	return comparison[0], nil
 }
 
 // RebuildMany executes rebuilds for each provided rebuild.Input returning their rebuild.Verdicts.

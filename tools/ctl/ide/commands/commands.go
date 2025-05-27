@@ -314,7 +314,7 @@ func NewGlobalCmds(app *tview.Application, rb *rebuilder.Rebuilder, modalFn moda
 				}
 				var successes int
 				for v := range verdictChan {
-					if v.Message == "" {
+					if len(v.Message) < 1 {
 						successes += 1
 					}
 					wdex.WriteRebuild(ctx, rundex.NewRebuildFromVerdict(v, "local", runID, time.Now().UTC()))

@@ -51,12 +51,12 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 	if req.UseSyscallMonitor {
 		return nil, errors.New("syscall monitor not supported")
 	}
-	regClient := httpx.NewCachedClient(http.DefaultClient, &cache.CoalescingMemoryCache{})
+
 	mux := rebuild.RegistryMux{
-		Debian:   debianreg.HTTPRegistry{Client: regClient},
-		CratesIO: cratesreg.HTTPRegistry{Client: regClient},
-		NPM:      npmreg.HTTPRegistry{Client: regClient},
-		PyPI:     pypireg.HTTPRegistry{Client: regClient},
+		Debian:   debianreg.HTTPRegistry{Client: req.RegClient},
+		CratesIO: cratesreg.HTTPRegistry{Client: req.RegClient},
+		NPM:      npmreg.HTTPRegistry{Client: req.RegClient},
+		PyPI:     pypireg.HTTPRegistry{Client: req.RegClient},
 	}
 	t := rebuild.Target{Ecosystem: req.Ecosystem, Package: req.Package, Version: req.Version, Artifact: req.Artifact}
 	verdict := &schema.Verdict{Target: t}
@@ -67,18 +67,18 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 		case rebuild.PyPI:
 			release, err := mux.PyPI.Release(ctx, t.Package, t.Version)
 			if err != nil {
-				verdict.Message = err.Error()
+				verdict.Message = []string{err.Error()}
 				return verdict, nil
 				//return nil, errors.Wrap(err, "fetching pypi release")
 			}
 			wheel, err := pypi.FindPureWheel(release.Artifacts)
 			if err != nil {
 				// TODO: requires PR #468
-				//wheel, err = pypi.FindSourceDistribution(release.Artifacts)
-				//if err != nil {
-				verdict.Message = err.Error()
-				return verdict, nil
-				//}
+				wheel, err = pypi.FindSourceDistribution(release.Artifacts)
+				if err != nil {
+					verdict.Message = []string{err.Error()}
+					return verdict, nil
+				}
 			}
 			t.Artifact = wheel.Filename
 		case rebuild.CratesIO:
@@ -94,17 +94,19 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 	verdict.Target.Artifact = t.Artifact
 	strategy, err := s.infer(ctx, t, mux)
 	if err != nil {
-		verdict.Message = err.Error()
+		verdict.Message = []string{err.Error()}
 		return verdict, nil
 	}
 	verdict.StrategyOneof = schema.NewStrategyOneOf(strategy)
-	var comparisonOutcome error
+	var comparisonOutcome []error
 	if err := s.build(ctx, t, strategy, s.store, buildOpts{PrebuildURL: s.prebuildURL, LogSink: s.logsink}); err != nil {
-		verdict.Message = err.Error()
+		verdict.Message = []string{err.Error()}
 	} else if comparisonOutcome, err = compare(ctx, t, s.store, mux); err != nil {
-		verdict.Message = err.Error()
+		verdict.Message = []string{err.Error()}
 	} else if comparisonOutcome != nil {
-		verdict.Message = comparisonOutcome.Error()
+		for _, outcome := range comparisonOutcome {
+			verdict.Message = append(verdict.Message, outcome.Error())
+		}
 	}
 
 	return verdict, nil
@@ -113,6 +115,13 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 func (s *localExecutionService) infer(ctx context.Context, t rebuild.Target, mux rebuild.RegistryMux) (rebuild.Strategy, error) {
 	mem := memory.NewStorage()
 	fs := memfs.New()
+	defer func() error {
+		err := fs.Remove(fs.Root())
+		if err != nil {
+			return errors.Wrap(err, "removing the root filesystem to clean memory")
+		}
+		return nil
+	}()
 	var rebuilder rebuild.Rebuilder
 	switch t.Ecosystem {
 	case rebuild.NPM:
@@ -188,7 +197,7 @@ func (s *localExecutionService) build(ctx context.Context, t rebuild.Target, str
 }
 
 // returns True, nil for exactMatch, returns False, nil for stabilizedMatch
-func compare(ctx context.Context, t rebuild.Target, store rebuild.LocatableAssetStore, mux rebuild.RegistryMux) (error, error) {
+func compare(ctx context.Context, t rebuild.Target, store rebuild.LocatableAssetStore, mux rebuild.RegistryMux) ([]error, error) {
 	if _, err := store.Reader(ctx, rebuild.RebuildAsset.For(t)); err != nil {
 		return nil, errors.Wrap(err, "accessing rebuild artifact")
 	}
@@ -253,11 +262,11 @@ func compare(ctx context.Context, t rebuild.Target, store rebuild.LocatableAsset
 	stabilizedMatch := bytes.Equal(rbSummary.StabilizedHash.Sum(nil), upSummary.StabilizedHash.Sum(nil))
 	if exactMatch {
 		log.Printf("Exact match found for %s %s %s", t.Ecosystem, t.Package, t.Artifact)
-		return errors.New("Exact match"), nil
+		return []error{errors.New("Exact match")}, nil
 	}
 	if stabilizedMatch {
 		log.Printf("Stabilized match found for %s %s %s", t.Ecosystem, t.Package, t.Artifact)
-		return errors.New("Stabilized match"), nil
+		return []error{errors.New("Stabilized match")}, nil
 	}
 
 	// TODO: Code duplication with SummarizeArtifacts
@@ -276,7 +285,8 @@ func compare(ctx context.Context, t rebuild.Target, store rebuild.LocatableAsset
 	}
 
 	// Copy the file content to the assetStore
-	if _, err := io.Copy(file, resp.Body); err != nil {
+	//_, err := io.Copy(file, resp.Body)
+	if _, err = io.CopyBuffer(file, resp.Body, make([]byte, 32*1024)); err != nil {
 		return nil, errors.Wrap(err, "failed to write file to assetStore")
 	}
 
@@ -295,8 +305,9 @@ func (s *localExecutionService) SmoketestPackage(ctx context.Context, req schema
 			Package:   req.Package,
 			Version:   ver,
 			ID:        req.ID,
+			RegClient: httpx.NewCachedClient(http.DefaultClient, &cache.CoalescingMemoryCache{}),
 		}
-
+		//regClient := httpx.NewCachedClient(http.DefaultClient, &cache.CoalescingMemoryCache{})
 		reb, err := s.RebuildPackage(ctx, rebReq)
 		if err != nil {
 			// cannot find the artifact
@@ -305,18 +316,19 @@ func (s *localExecutionService) SmoketestPackage(ctx context.Context, req schema
 					Ecosystem: rebReq.Ecosystem,
 					Package:   rebReq.Package,
 					Version:   rebReq.Version},
-				Message: err.Error()})
+				Message: []string{err.Error()}})
 			//return nil, errors.Wrap(err, "rebuilding package")
 		} else {
 			verdicts = append(verdicts, *reb)
 		}
 	}
 
-	for _, c := range s.containers {
-		err := c.StopContainer(ctx)
-		if err != nil {
-			log.Printf("failed to stop container: %v", err)
-		}
+	c := s.containers[req.Package]
+	err := c.StopContainer(ctx)
+	if err != nil {
+		log.Printf("failed to stop container: %v", err)
+	} else {
+		delete(s.containers, req.Package)
 	}
 
 	return &schema.SmoketestResponse{

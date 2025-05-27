@@ -144,6 +144,7 @@ type SmoketestRequest struct {
 	Versions  []string          `form:",required"`
 	ID        string            `form:",required"`
 	Strategy  *StrategyOneOf    `form:""`
+	Verdicts  chan Verdict      `form:""`
 }
 
 var _ api.Message = SmoketestRequest{}

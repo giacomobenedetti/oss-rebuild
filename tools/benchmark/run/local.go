@@ -191,6 +191,8 @@ func (s *localExecutionService) build(ctx context.Context, t rebuild.Target, str
 		_, _ = io.Copy(logw, outb)
 	}()
 
+	log.Printf("Container cache size after adding new container: %d containers", len(s.containers))
+
 	return nil
 }
 
@@ -294,7 +296,7 @@ func compare(ctx context.Context, t rebuild.Target, store rebuild.LocatableAsset
 }
 
 func (s *localExecutionService) SmoketestPackage(ctx context.Context, req schema.SmoketestRequest) (*schema.SmoketestResponse, error) {
-	var verdicts []schema.Verdict
+	//var verdicts []schema.Verdict
 
 	for _, ver := range req.Versions {
 
@@ -309,15 +311,23 @@ func (s *localExecutionService) SmoketestPackage(ctx context.Context, req schema
 		reb, err := s.RebuildPackage(ctx, rebReq)
 		if err != nil {
 			// cannot find the artifact
-			verdicts = append(verdicts, schema.Verdict{
+			//verdicts = append(verdicts, schema.Verdict{
+			//	Target: rebuild.Target{
+			//		Ecosystem: rebReq.Ecosystem,
+			//		Package:   rebReq.Package,
+			//		Version:   rebReq.Version},
+			//	Message: []string{err.Error()}})
+			req.Verdicts <- schema.Verdict{
 				Target: rebuild.Target{
 					Ecosystem: rebReq.Ecosystem,
 					Package:   rebReq.Package,
 					Version:   rebReq.Version},
-				Message: []string{err.Error()}})
+				Message: []string{err.Error()}}
+
 			//return nil, errors.Wrap(err, "rebuilding package")
 		} else {
-			verdicts = append(verdicts, *reb)
+			//verdicts = append(verdicts, *reb)
+			req.Verdicts <- *reb
 		}
 	}
 
@@ -330,7 +340,7 @@ func (s *localExecutionService) SmoketestPackage(ctx context.Context, req schema
 	}
 
 	return &schema.SmoketestResponse{
-		Verdicts: verdicts,
+		Verdicts: nil,
 		Executor: "docker",
 	}, nil
 	//return nil, errors.New("Not implemented")

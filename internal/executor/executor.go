@@ -5,13 +5,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/google/oss-rebuild/internal/textwrap"
 	"github.com/pkg/errors"
 	"io"
 	"os"
 	"strings"
-	"sync"
-
-	"github.com/google/oss-rebuild/internal/textwrap"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -23,7 +21,6 @@ type DockerExecutor struct {
 	packageName string
 	containerID string
 	client      *client.Client
-	mutex       sync.Mutex
 }
 
 // NewDockerExecutor creates a new DockerExecutor for a specific package.
@@ -100,8 +97,8 @@ WORKDIR %s
 
 // ExecuteWithStrategy checks out the correct commit and executes the build inside the container.
 func (d *DockerExecutor) ExecuteWithStrategy(ctx context.Context, instructions rebuild.Instructions, target rebuild.Target, assetStore rebuild.LocatableAssetStore) (bytes.Buffer, error) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
+	//d.mutex.Lock()
+	//defer d.mutex.Unlock()
 	outbuf := &bytes.Buffer{}
 
 	if d.containerID == "" {
@@ -229,8 +226,8 @@ func (d *DockerExecutor) executeCommand(ctx context.Context, command []string, o
 
 // StopContainer stops and removes the Docker container.
 func (d *DockerExecutor) StopContainer(ctx context.Context) error {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
+	//d.mutex.Lock()
+	//defer d.mutex.Unlock()
 
 	if d.containerID == "" {
 		return nil

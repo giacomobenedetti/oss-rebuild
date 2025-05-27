@@ -184,25 +184,26 @@ func (w *smoketestWorker) ProcessOne(ctx context.Context, p benchmark.Package, o
 		Package:   p.Name,
 		Versions:  p.Versions,
 		ID:        w.runID,
+		Verdicts:  out,
 	}
-	resp, err := w.execService.SmoketestPackage(ctx, req)
-	if err != nil {
-		errMsg := err.Error()
-		for _, v := range p.Versions {
-			out <- schema.Verdict{
-				Target: rebuild.Target{
-					Ecosystem: rebuild.Ecosystem(p.Ecosystem),
-					Package:   p.Name,
-					Version:   v,
-				},
-				Message: []string{errMsg},
-			}
-		}
-		return
-	}
-	for _, verdict := range resp.Verdicts {
-		out <- verdict
-	}
+	_, _ = w.execService.SmoketestPackage(ctx, req)
+	//if err != nil {
+	//	errMsg := err.Error()
+	//	for _, v := range p.Versions {
+	//		out <- schema.Verdict{
+	//			Target: rebuild.Target{
+	//				Ecosystem: rebuild.Ecosystem(p.Ecosystem),
+	//				Package:   p.Name,
+	//				Version:   v,
+	//			},
+	//			Message: []string{errMsg},
+	//		}
+	//	}
+	//	return
+	//}
+	//for _, verdict := range resp.Verdicts {
+	//	out <- verdict
+	//}
 }
 
 func defaultLimiters() map[string]<-chan time.Time {

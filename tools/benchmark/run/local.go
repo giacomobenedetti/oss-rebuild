@@ -183,15 +183,13 @@ func (s *localExecutionService) build(ctx context.Context, t rebuild.Target, str
 		}
 	}
 
-	logw, err := out.Writer(ctx, rebuild.DebugLogsAsset.For(t))
-	if err != nil {
-		return err
-	}
-	defer logw.Close()
+	defer func() {
+		logw, _ := out.Writer(ctx, rebuild.DebugLogsAsset.For(t))
 
-	if _, err := io.Copy(logw, outb); err != nil {
-		return err
-	}
+		defer logw.Close()
+
+		_, _ = io.Copy(logw, outb)
+	}()
 
 	return nil
 }

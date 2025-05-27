@@ -313,7 +313,7 @@ func isCloudRun(u *url.URL) bool {
 }
 
 var runBenchmark = &cobra.Command{
-	Use:   "run-bench smoketest|attest -api <URI>  [-local -prebuild-bucket <BUCKET> -prebuild-version <VERSION>] [-format=summary|csv] <benchmark.json>",
+	Use:   "run-bench smoketest|attest -api <URI>  [-local -resume-build -prebuild-bucket <BUCKET> -prebuild-version <VERSION>] [-format=summary|csv] <benchmark.json>",
 	Short: "Run benchmark",
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -329,6 +329,50 @@ var runBenchmark = &cobra.Command{
 			path := args[1]
 			log.Printf("Extracting benchmark %s...\n", filepath.Base(path))
 			set, err = benchmark.ReadBenchmark(path)
+			if *resumeBuild != "" {
+				lc := rundex.NewLocalClient(localfiles.Rundex())
+				runs, err := lc.FetchRuns(ctx, rundex.FetchRunsOpts{IDs: []string{*resumeBuild}})
+				if err != nil {
+					log.Fatal(errors.Wrap(err, "fetching rebuilds"))
+				}
+				rebuilds, err := lc.FetchRebuilds(ctx, &rundex.FetchRebuildRequest{Runs: []string{runs[0].ID}})
+
+				if err != nil {
+					log.Fatal(errors.Wrap(err, "fetching rebuilds"))
+				}
+				var newSet benchmark.PackageSet
+				var newCount int
+				// TODO: fix this for resuming correctly the run
+				for _, rebuild := range rebuilds {
+					for _, pack := range set.Packages {
+						var newPackage benchmark.Package
+						if pack.Name == rebuild.Package {
+							newPackage.Name = rebuild.Package
+							var newVersions []string
+							var newArtifacts []string
+							for _, vers := range pack.Versions {
+								if vers == rebuild.Version {
+									continue
+								} else {
+									newVersions = append(newVersions, vers)
+									newArtifacts = append(newArtifacts, rebuild.Artifact)
+									newCount = newCount + len(newVersions)
+								}
+							}
+							if newVersions != nil {
+								newPackage.Versions = newVersions
+								newPackage.Artifacts = newArtifacts
+							}
+						}
+						if newPackage.Versions != nil {
+							newSet.Packages = append(newSet.Packages, newPackage)
+						}
+					}
+
+				}
+				set.Packages = newSet.Packages
+				set.Metadata.Count = newCount
+			}
 			if err != nil {
 				log.Fatal(errors.Wrap(err, "reading benchmark file"))
 			}
@@ -424,8 +468,8 @@ var runBenchmark = &cobra.Command{
 		bar.Start()
 		for v := range verdictChan {
 			bar.Increment()
-			if *verbose && v.Message != "" {
-				fmt.Printf("\n%v: %s\n", v.Target, v.Message)
+			if *verbose && len(v.Message) > 0 {
+				fmt.Printf("\n%v: %s\n", v.Target, strings.Join(v.Message, ", "))
 			}
 			if dex != nil {
 				if err := dex.WriteRebuild(ctx, rundex.NewRebuildFromVerdict(v, "local", runID, time.Now().UTC())); err != nil {
@@ -443,7 +487,7 @@ var runBenchmark = &cobra.Command{
 		case "", "summary":
 			var successes int
 			for _, v := range verdicts {
-				if v.Message == "" {
+				if len(v.Message) < 1 {
 					successes++
 				}
 			}
@@ -452,9 +496,12 @@ var runBenchmark = &cobra.Command{
 			w := csv.NewWriter(cmd.OutOrStdout())
 			defer w.Flush()
 			for _, v := range verdicts {
-				if err := w.Write([]string{fmt.Sprintf("%v", v.Target), v.Message}); err != nil {
-					log.Fatal(errors.Wrap(err, "writing CSV"))
+				for _, m := range v.Message {
+					if err := w.Write([]string{fmt.Sprintf("%v", v.Target), m}); err != nil {
+						log.Fatal(errors.Wrap(err, "writing CSV"))
+					}
 				}
+
 			}
 		default:
 			log.Fatalf("Unsupported format: %s", *format)
@@ -822,6 +869,7 @@ var (
 	async           = flag.Bool("async", false, "true if this benchmark should run asynchronously")
 	taskQueuePath   = flag.String("task-queue", "", "the path identifier of the task queue to use")
 	taskQueueEmail  = flag.String("task-queue-email", "", "the email address of the serivce account Cloud Tasks should authorize as")
+	resumeBuild     = flag.String("resume-build", "", "true if this benchmark should be resumed")
 	// run-one
 	strategyPath = flag.String("strategy", "", "the strategy file to use")
 	// get-results
@@ -856,6 +904,7 @@ func init() {
 	runBenchmark.Flags().AddGoFlag(flag.Lookup("task-queue-email"))
 	runBenchmark.Flags().AddGoFlag(flag.Lookup("use-network-proxy"))
 	runBenchmark.Flags().AddGoFlag(flag.Lookup("use-syscall-monitor"))
+	runBenchmark.Flags().AddGoFlag(flag.Lookup("resume-build"))
 
 	runOne.Flags().AddGoFlag(flag.Lookup("api"))
 	runOne.Flags().AddGoFlag(flag.Lookup("strategy"))

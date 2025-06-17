@@ -552,7 +552,7 @@ RLpmHHG1JOVdOA==
 			}
 			d.BuildProject = "foo-project"
 			d.BuildServiceAccount = "foo-role"
-			d.UtilPrebuildBucket = "foo-prebuild-bucket"
+			d.PrebuildConfig.Bucket = "foo-prebuild-bucket"
 			d.BuildLogsBucket = "foo-logs-bucket"
 			tempDir := must(os.MkdirTemp("", "test-*"))
 			defer os.RemoveAll(tempDir)
@@ -614,7 +614,7 @@ RLpmHHG1JOVdOA==
 					Steps:       buildSteps,
 				},
 				mustJSON[rebuild.BuildInfo](buildinfo),
-				cmpopts.IgnoreFields(rebuild.BuildInfo{}, "ID", "Builder", "BuildStart", "BuildEnd"),
+				cmpopts.IgnoreFields(rebuild.BuildInfo{}, "ObliviousID", "Builder", "BuildStart", "BuildEnd"),
 			)
 			if diff != "" {
 				t.Errorf("BuildInfo diff: %s", diff)

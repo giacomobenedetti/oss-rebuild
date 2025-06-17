@@ -42,56 +42,11 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-func doDebianRebuild(ctx context.Context, t rebuild.Target, id string, mux rebuild.RegistryMux, s rebuild.Strategy, opts rebuild.RemoteOptions) (upstreamURL string, err error) {
-	_, name, err := debianrb.ParseComponent(t.Package)
-	if err != nil {
-		return "", err
-	}
-	if err := debianrb.RebuildRemote(ctx, rebuild.Input{Target: t, Strategy: s}, id, opts); err != nil {
-		return "", errors.Wrap(err, "rebuild failed")
-	}
-	return mux.Debian.ArtifactURL(ctx, name, t.Artifact)
-}
-
-func doNPMRebuild(ctx context.Context, t rebuild.Target, id string, mux rebuild.RegistryMux, s rebuild.Strategy, opts rebuild.RemoteOptions) (upstreamURL string, err error) {
-	if err := npmrb.RebuildRemote(ctx, rebuild.Input{Target: t, Strategy: s}, id, opts); err != nil {
-		return "", errors.Wrap(err, "rebuild failed")
-	}
-	vmeta, err := mux.NPM.Version(ctx, t.Package, t.Version)
-	if err != nil {
-		return "", errors.Wrap(err, "fetching metadata failed")
-	}
-	return vmeta.Dist.URL, nil
-}
-
-func doCratesRebuild(ctx context.Context, t rebuild.Target, id string, mux rebuild.RegistryMux, s rebuild.Strategy, opts rebuild.RemoteOptions) (upstreamURL string, err error) {
-	if err := cratesrb.RebuildRemote(ctx, rebuild.Input{Target: t, Strategy: s}, id, opts); err != nil {
-		return "", errors.Wrap(err, "rebuild failed")
-	}
-	vmeta, err := mux.CratesIO.Version(ctx, t.Package, t.Version)
-	if err != nil {
-		return "", errors.Wrap(err, "fetching metadata failed")
-	}
-	return vmeta.DownloadURL, nil
-}
-
-func doPyPIRebuild(ctx context.Context, t rebuild.Target, id string, mux rebuild.RegistryMux, s rebuild.Strategy, opts rebuild.RemoteOptions) (upstreamURL string, err error) {
-	release, err := mux.PyPI.Release(ctx, t.Package, t.Version)
-	if err != nil {
-		return "", errors.Wrap(err, "fetching metadata failed")
-	}
-	for _, r := range release.Artifacts {
-		if r.Filename == t.Artifact {
-			upstreamURL = r.URL
-		}
-	}
-	if upstreamURL == "" {
-		return "", errors.New("artifact not found in release")
-	}
-	if err := pypirb.RebuildRemote(ctx, rebuild.Input{Target: t, Strategy: s}, id, opts); err != nil {
-		return "", errors.Wrap(err, "rebuild failed")
-	}
-	return upstreamURL, nil
+var rebuilders = map[rebuild.Ecosystem]rebuild.Rebuilder{
+	rebuild.NPM:      &npmrb.Rebuilder{},
+	rebuild.PyPI:     &pypirb.Rebuilder{},
+	rebuild.CratesIO: &cratesrb.Rebuilder{},
+	rebuild.Debian:   &debianrb.Rebuilder{},
 }
 
 func sanitize(key string) string {
@@ -133,8 +88,7 @@ type RebuildPackageDeps struct {
 	GCBClient                  gcb.Client
 	BuildProject               string
 	BuildServiceAccount        string
-	UtilPrebuildBucket         string
-	UtilPrebuildAuth           bool
+	PrebuildConfig             rebuild.PrebuildConfig
 	BuildLogsBucket            string
 	ServiceRepo                rebuild.Location
 	PrebuildRepo               rebuild.Location
@@ -227,8 +181,8 @@ func buildAndAttest(ctx context.Context, deps *RebuildPackageDeps, mux rebuild.R
 	if err != nil {
 		return errors.Wrap(err, "creating debug store")
 	}
-	id := uuid.New().String()
-	remoteMetadata, err := deps.RemoteMetadataStoreBuilder(ctx, id)
+	obID := uuid.New().String()
+	remoteMetadata, err := deps.RemoteMetadataStoreBuilder(ctx, obID)
 	if err != nil {
 		return errors.Wrap(err, "creating rebuild store")
 	}
@@ -251,12 +205,11 @@ func buildAndAttest(ctx context.Context, deps *RebuildPackageDeps, mux rebuild.R
 	}
 	hashes := []crypto.Hash{crypto.SHA256}
 	opts := rebuild.RemoteOptions{
+		ObliviousID:         obID,
 		GCBClient:           deps.GCBClient,
 		Project:             deps.BuildProject,
 		BuildServiceAccount: deps.BuildServiceAccount,
-		UtilPrebuildBucket:  deps.UtilPrebuildBucket,
-		UtilPrebuildDir:     deps.PrebuildRepo.Ref,
-		UtilPrebuildAuth:    deps.UtilPrebuildAuth,
+		PrebuildConfig:      deps.PrebuildConfig,
 		LogsBucket:          deps.BuildLogsBucket,
 		LocalMetadataStore:  deps.LocalMetadataStore,
 		DebugStore:          debugStore,
@@ -264,22 +217,16 @@ func buildAndAttest(ctx context.Context, deps *RebuildPackageDeps, mux rebuild.R
 		UseSyscallMonitor:   useSyscallMonitor,
 		UseNetworkProxy:     useProxy,
 	}
-	var upstreamURI string
-	switch t.Ecosystem {
-	case rebuild.NPM:
-		hashes = append(hashes, crypto.SHA512)
-		upstreamURI, err = doNPMRebuild(ctx, t, id, mux, strategy, opts)
-	case rebuild.CratesIO:
-		upstreamURI, err = doCratesRebuild(ctx, t, id, mux, strategy, opts)
-	case rebuild.PyPI:
-		upstreamURI, err = doPyPIRebuild(ctx, t, id, mux, strategy, opts)
-	case rebuild.Debian:
-		upstreamURI, err = doDebianRebuild(ctx, t, id, mux, strategy, opts)
-	default:
+	rebuilder, ok := rebuilders[t.Ecosystem]
+	if !ok {
 		return api.AsStatus(codes.InvalidArgument, errors.New("unsupported ecosystem"))
 	}
+	if err := rebuilder.RebuildRemote(ctx, rebuild.Input{Target: t, Strategy: strategy}, opts); err != nil {
+		return errors.Wrap(err, "executing rebuild")
+	}
+	upstreamURI, err := rebuilder.UpstreamURL(ctx, t, mux)
 	if err != nil {
-		return errors.Wrap(err, "rebuilding")
+		return errors.Wrap(err, "getting upstream url")
 	}
 	rb, up, err := verifier.SummarizeArtifacts(ctx, remoteMetadata, t, upstreamURI, hashes, stabilizers)
 	if err != nil {
@@ -293,9 +240,9 @@ func buildAndAttest(ctx context.Context, deps *RebuildPackageDeps, mux rebuild.R
 	if u, err := url.Parse(deps.ServiceRepo.Repo); err != nil {
 		return errors.Wrap(err, "bad ServiceRepo URL")
 	} else if (u.Scheme == "file" || u.Scheme == "") && !deps.PublishForLocalServiceRepo {
-		return errors.Wrap(err, "disallowed file:// ServiceRepo URL")
+		return errors.New("disallowed file:// ServiceRepo URL")
 	}
-	eqStmt, buildStmt, err := verifier.CreateAttestations(ctx, t, buildDef, strategy, id, rb, up, deps.LocalMetadataStore, deps.ServiceRepo, deps.PrebuildRepo, buildDefRepo)
+	eqStmt, buildStmt, err := verifier.CreateAttestations(ctx, t, buildDef, strategy, obID, rb, up, deps.LocalMetadataStore, deps.ServiceRepo, deps.PrebuildRepo, buildDefRepo, opts.PrebuildConfig)
 	if err != nil {
 		return errors.Wrap(err, "creating attestations")
 	}
@@ -356,14 +303,11 @@ func rebuildPackage(ctx context.Context, req schema.RebuildPackageRequest, deps 
 func RebuildPackage(ctx context.Context, req schema.RebuildPackageRequest, deps *RebuildPackageDeps) (*schema.Verdict, error) {
 	started := time.Now().UTC()
 	ctx = context.WithValue(ctx, rebuild.RunID, req.ID)
-	var timeout time.Duration
-	if req.BuildTimeout == 0 {
-		// Cloud Run times out after 60 minutes, give ourselves 5 minutes to cleanup and log results.
-		timeout = 55 * time.Minute
-	} else {
-		timeout = req.BuildTimeout
+	// Cloud Run times out after 60 minutes, give ourselves 5 minutes to cleanup and log results.
+	ctx = context.WithValue(ctx, rebuild.GCBWaitDeadlineID, time.Now().Add(55*time.Minute))
+	if req.BuildTimeout != 0 {
+		ctx = context.WithValue(ctx, rebuild.GCBCancelDeadlineID, time.Now().Add(req.BuildTimeout))
 	}
-	ctx = context.WithValue(ctx, rebuild.GCBDeadlineID, time.Now().Add(timeout))
 	v, err := rebuildPackage(ctx, req, deps)
 	if err != nil {
 		return nil, err
@@ -396,7 +340,7 @@ func RebuildPackage(ctx context.Context, req schema.RebuildPackageRequest, deps 
 		ExecutorVersion: os.Getenv("K_REVISION"),
 		RunID:           req.ID,
 		BuildID:         bi.BuildID,
-		ObliviousID:     bi.ID,
+		ObliviousID:     bi.ObliviousID,
 		Started:         started,
 		Created:         time.Now().UTC(),
 	})

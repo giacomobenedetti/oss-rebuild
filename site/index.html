@@ -14,6 +14,7 @@
         --primary: #3740ff;
         --primary-dark: #2930cc;
         --secondary: #ff5e5b;
+        --logo: #333;
         --light: #f5f7fa;
         --dark: #2d3748;
         --gray: #718096;
@@ -57,15 +58,17 @@
       .logo {
         font-size: 1.5rem;
         font-weight: 700;
-        color: var(--primary);
+        color: var(--logo);
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        text-decoration: none;
       }
 
       .logo-icon {
-        width: 2rem;
-        height: 2rem;
+        width: 6rem;
+        height: 2.5rem;
+        color: var(--logo);
       }
 
       .nav-links {
@@ -354,7 +357,7 @@
         font-size: 0.875rem;
       }
 
-      @media (max-width: 768px) {
+      @media (max-width: 930px) {
         .cta-buttons {
           flex-direction: column;
           align-items: center;
@@ -400,7 +403,12 @@
     <header>
       <div class="container">
         <nav>
-          <div class="logo">OSS Rebuild</div>
+          <a href="#" class="logo">
+            <svg alt="OSS Rebuild Logo" class="logo-icon">
+              <use href="logo.svg#logo">
+            </svg>
+            OSS Rebuild
+          </a>
 
           <div class="nav-links">
             <a href="#features">Features</a>

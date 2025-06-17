@@ -27,7 +27,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
-	"cloud.google.com/go/vertexai/genai"
 	"github.com/cheggaaa/pb"
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/google/oss-rebuild/internal/api"
@@ -44,7 +43,6 @@ import (
 	"github.com/google/oss-rebuild/tools/benchmark"
 	"github.com/google/oss-rebuild/tools/benchmark/run"
 	"github.com/google/oss-rebuild/tools/ctl/ide"
-	"github.com/google/oss-rebuild/tools/ctl/ide/assistant"
 	"github.com/google/oss-rebuild/tools/ctl/localfiles"
 	"github.com/google/oss-rebuild/tools/ctl/migrations"
 	"github.com/google/oss-rebuild/tools/ctl/rundex"
@@ -52,8 +50,13 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/api/cloudbuild/v1"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
+	"google.golang.org/api/serviceusage/v1"
+	"google.golang.org/genai"
 	"gopkg.in/yaml.v3"
 )
+
+const vertexAIService = "aiplatform.googleapis.com"
 
 var rootCmd = &cobra.Command{
 	Use:   "ctl",
@@ -185,17 +188,31 @@ var tui = &cobra.Command{
 			PyPI:     pypireg.HTTPRegistry{Client: regclient},
 		}
 		butler := localfiles.NewButler(*metadataBucket, *logsBucket, *debugStorage, mux)
-		aiProject := *project
-		if *llmProject != "" {
-			aiProject = *llmProject
+		var aiClient *genai.Client
+		{
+			aiProject := *project
+			if *llmProject != "" {
+				aiProject = *llmProject
+			}
+			serviceUsageClient, err := serviceusage.NewService(cmd.Context(), option.WithScopes(serviceusage.CloudPlatformScope))
+			if err != nil {
+				log.Fatalf("Failed to create Service Usage client: %v", err)
+			}
+			if service, err := serviceUsageClient.Services.Get(fmt.Sprintf("projects/%s/services/%s", aiProject, vertexAIService)).Do(); err != nil {
+				log.Fatalf("Failed to check for vertex AI service: %v", err)
+			} else if service.State == "ENABLED" {
+				aiClient, err = genai.NewClient(cmd.Context(), &genai.ClientConfig{
+					Backend:  genai.BackendVertexAI,
+					Project:  aiProject,
+					Location: "us-central1",
+				})
+				if err != nil {
+					log.Fatal(errors.Wrap(err, "failed to create a genai client"))
+				}
+			}
 		}
-		aiClient, err := genai.NewClient(cmd.Context(), aiProject, "us-central1")
-		if err != nil {
-			log.Fatal(errors.Wrap(err, "failed to create a genai client"))
-		}
-		asst := assistant.NewAssistant(butler, aiClient)
 		benches := benchmark.NewFSRepository(osfs.New(*benchmarkDir))
-		tapp := ide.NewTuiApp(dex, watcher, rundex.FetchRebuildOpts{Clean: *clean}, benches, buildDefs, butler, asst)
+		tapp := ide.NewTuiApp(dex, watcher, rundex.FetchRebuildOpts{Clean: *clean}, benches, buildDefs, butler, aiClient)
 		if err := tapp.Run(cmd.Context()); err != nil {
 			// TODO: This cleanup will be unnecessary once NewTuiApp does split logging.
 			log.Default().SetOutput(os.Stdout)

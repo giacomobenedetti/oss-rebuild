@@ -265,177 +265,123 @@ resource "terraform_data" "debug" {
   input = var.debug
 }
 
-resource "terraform_data" "git_dir" {
-  input = (
-    !startswith(var.repo, "file://") ? "!remote!" :
-    fileexists(join("/", [substr(var.repo, 7, -1), ".git/config"])) ? join("/", [substr(var.repo, 7, -1), ".git"]) :
-    fileexists(join("/", [substr(var.repo, 7, -1), ".jj/repo/store/git/config"])) ? join("/", [substr(var.repo, 7, -1), ".jj/repo/store/git"]) :
-  "")
-}
-
 locals {
   registry_url = "${google_artifact_registry_repository.registry.location}-docker.pkg.dev/${var.project}/${google_artifact_registry_repository.registry.repository_id}"
-  # Add .git suffix if it's a GitHub URL and doesn't already end with .git
-  repo_with_git = (
-    can(regex("^https://github\\.com/", var.repo)) && !endswith(var.repo, ".git") ? "${var.repo}.git" : var.repo
-  )
-  repo_docker_context = (
-    startswith(var.repo, "file:")
-    ? "- < <(GIT_DIR=${terraform_data.git_dir.output} git archive --format=tar ${var.service_commit})"
-  : "${local.repo_with_git}#${var.service_commit}")
-}
-
-resource "terraform_data" "image" {
-  for_each = {
-    "gateway" = {
-      name      = "gateway"
-      image     = "${local.registry_url}/gateway"
-      version   = terraform_data.service_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}"]
+  service_images = {
+    gateway = {
+      dockerfile = "build/package/Dockerfile.gateway"
+      build_args = ["DEBUG=${terraform_data.debug.output}"]
     }
-    "git-cache" = {
-      name      = "git_cache"
-      image     = "${local.registry_url}/git_cache"
-      version   = terraform_data.service_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}"]
+    git_cache = {
+      dockerfile = "build/package/Dockerfile.git_cache"
+      build_args = ["DEBUG=${terraform_data.debug.output}"]
     }
-    "rebuilder" = {
-      name      = "rebuilder"
-      image     = "${local.registry_url}/rebuilder"
-      version   = terraform_data.service_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}"]
+    rebuilder = {
+      dockerfile = "build/package/Dockerfile.rebuilder"
+      build_args = ["DEBUG=${terraform_data.debug.output}"]
     }
-    "inference" = {
-      name      = "inference"
-      image     = "${local.registry_url}/inference"
-      version   = terraform_data.service_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}"]
+    inference = {
+      dockerfile = "build/package/Dockerfile.inference"
+      build_args = ["DEBUG=${terraform_data.debug.output}"]
     }
-    "api" = {
-      name      = "api"
-      image     = "${local.registry_url}/api"
-      version   = terraform_data.service_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}", "BUILD_REPO=${var.repo}", "BUILD_VERSION=${terraform_data.service_version.output}"]
-    }
-    "gsutil_writeonly" = {
-      name      = "gsutil_writeonly"
-      image     = "${local.registry_url}/gsutil_writeonly"
-      version   = terraform_data.prebuild_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}"]
-    }
-    "proxy" = {
-      name      = "proxy"
-      image     = "${local.registry_url}/proxy"
-      version   = terraform_data.prebuild_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}"]
-    }
-    "timewarp" = {
-      name      = "timewarp"
-      image     = "${local.registry_url}/timewarp"
-      version   = terraform_data.prebuild_version.output
-      buildargs = ["DEBUG=${terraform_data.debug.output}"]
+    api = {
+      dockerfile = "build/package/Dockerfile.api"
+      build_args = [
+        "DEBUG=${terraform_data.debug.output}",
+        "BUILD_REPO=${var.repo}",
+        "BUILD_VERSION=${terraform_data.service_version.output}"
+      ]
     }
   }
-  provisioner "local-exec" {
-    command = <<-EOT
-      path=${each.value.image}:${each.value.version}
-      cmd="gcloud artifacts docker images describe $path"
-      # Suppress stdout, show first line of stderr, return cmd's status.
-      if ($cmd 2>&1 1>/dev/null | head -n1 >&2; exit $PIPESTATUS); then
-        echo Found $path
-      else
-        echo Building $path
-        docker build --quiet ${join(" ", [for arg in each.value.buildargs : "--build-arg ${arg}"])} -f build/package/Dockerfile.${each.value.name} -t $path ${local.repo_docker_context} && \
-          docker push --quiet $path
-      fi
-    EOT
-  }
-  lifecycle {
-    replace_triggered_by = [
-      terraform_data.service_version.output,
-      terraform_data.prebuild_version.output,
-      terraform_data.git_dir.output,
-    ]
+  prebuild_images = {
+    gsutil_writeonly = {
+      dockerfile = "build/package/Dockerfile.gsutil_writeonly"
+      build_args = ["DEBUG=${terraform_data.debug.output}"]
+    }
+    proxy = {
+      dockerfile = "build/package/Dockerfile.proxy"
+      build_args = ["DEBUG=${terraform_data.debug.output}"]
+    }
+    timewarp = {
+      dockerfile = "build/package/Dockerfile.timewarp"
+      build_args = ["DEBUG=${terraform_data.debug.output}"]
+    }
   }
 }
 
-resource "terraform_data" "binary" {
-  for_each = {
-    "gsutil_writeonly" = {
-      name    = "gsutil_writeonly"
-      image   = "${local.registry_url}/gsutil_writeonly"
-      version = terraform_data.prebuild_version.output
-    }
-    "proxy" = {
-      name    = "proxy"
-      image   = "${local.registry_url}/proxy"
-      version = terraform_data.prebuild_version.output
-    }
-    "timewarp" = {
-      name    = "timewarp"
-      image   = "${local.registry_url}/timewarp"
-      version = terraform_data.prebuild_version.output
-    }
-  }
-  provisioner "local-exec" {
-    command = <<-EOT
-      path=gs://${google_storage_bucket.bootstrap-tools.name}/${each.value.version}/${each.value.name}
-      cmd="gcloud storage objects describe $path"
-      # Suppress stdout, show first line of stderr, return cmd's status.
-      if ($cmd 2>&1 1>/dev/null | head -n1 >&2; exit $PIPESTATUS); then
-        echo "Binary already exists in GCS"
-      else
-        echo "Extracting and uploading binary"
-        set -o pipefail
-        docker save ${each.value.image}:${each.value.version} | \
-          tar -xO --wildcards "*/layer.tar" | \
-          tar -xO ${each.value.name} | \
-          gcloud storage cp - $path && \
-          gcloud storage objects update $path --custom-metadata=goog-reserved-posix-mode=750
-      fi
-    EOT
-  }
-  lifecycle {
-    replace_triggered_by = [
-      terraform_data.image,
-      google_storage_bucket.bootstrap-tools.name,
-    ]
-  }
+module "service_images" {
+  source = "./modules/container_build_push"
+
+  for_each = local.service_images
+
+  name            = each.key
+  image_url       = "${local.registry_url}/${each.key}"
+  image_version   = terraform_data.service_version.output
+  repo_url        = var.repo
+  commit          = var.service_commit
+  dockerfile_path = each.value.dockerfile
+  build_args      = each.value.build_args
+}
+
+module "prebuild_images" {
+  source = "./modules/container_build_push"
+
+  for_each = local.prebuild_images
+
+  name            = each.key
+  image_url       = "${local.registry_url}/${each.key}"
+  image_version   = terraform_data.prebuild_version.output
+  repo_url        = var.repo
+  commit          = var.prebuild_commit
+  dockerfile_path = each.value.dockerfile
+  build_args      = each.value.build_args
+}
+
+module "prebuild_binaries" {
+  source = "./modules/container_binary_upload"
+
+  for_each = local.prebuild_images
+
+  source_image_url = module.prebuild_images[each.key].full_image_url
+  binary_name      = each.key
+  gcs_destination  = "gs://${google_storage_bucket.bootstrap-tools.name}/${module.prebuild_images[each.key].image_version}/${each.key}"
+
+  depends_on = [module.prebuild_images]
 }
 
 data "google_artifact_registry_docker_image" "gateway" {
   location      = google_artifact_registry_repository.registry.location
   repository_id = google_artifact_registry_repository.registry.repository_id
-  image_name    = "gateway:${terraform_data.service_version.output}"
-  depends_on    = [terraform_data.image["gateway"]]
+  image_name = "gateway:${module.service_images["gateway"].image_version}"
+  depends_on    = [module.service_images["gateway"]]
 }
 
 data "google_artifact_registry_docker_image" "git-cache" {
   location      = google_artifact_registry_repository.registry.location
   repository_id = google_artifact_registry_repository.registry.repository_id
-  image_name    = "git_cache:${terraform_data.service_version.output}"
-  depends_on    = [terraform_data.image["git-cache"]]
+  image_name    = "git_cache:${module.service_images["git_cache"].image_version}"
+  depends_on    = [module.service_images["git_cache"]]
 }
 
 data "google_artifact_registry_docker_image" "rebuilder" {
   location      = google_artifact_registry_repository.registry.location
   repository_id = google_artifact_registry_repository.registry.repository_id
-  image_name    = "rebuilder:${terraform_data.service_version.output}"
-  depends_on    = [terraform_data.image["rebuilder"]]
+  image_name    = "rebuilder:${module.service_images["rebuilder"].image_version}"
+  depends_on    = [module.service_images["rebuilder"]]
 }
 
 data "google_artifact_registry_docker_image" "inference" {
   location      = google_artifact_registry_repository.registry.location
   repository_id = google_artifact_registry_repository.registry.repository_id
-  image_name    = "inference:${terraform_data.service_version.output}"
-  depends_on    = [terraform_data.image["inference"]]
+  image_name    = "inference:${module.service_images["inference"].image_version}"
+  depends_on    = [module.service_images["inference"]]
 }
 
 data "google_artifact_registry_docker_image" "api" {
   location      = google_artifact_registry_repository.registry.location
   repository_id = google_artifact_registry_repository.registry.repository_id
-  image_name    = "api:${terraform_data.service_version.output}"
-  depends_on    = [terraform_data.image["api"]]
+  image_name    = "api:${module.service_images["api"].image_version}"
+  depends_on    = [module.service_images["api"]]
 }
 
 ## Compute resources
@@ -565,6 +511,7 @@ resource "google_cloud_run_v2_service" "orchestrator" {
         "--user-agent=oss-rebuild+${var.host}/0.0.0",
         "--build-def-repo=https://github.com/google/oss-rebuild",
         "--build-def-repo-dir=definitions",
+        "--block-local-repo-publish=${var.public}",
       ]
       resources {
         limits = {
@@ -575,7 +522,7 @@ resource "google_cloud_run_v2_service" "orchestrator" {
     }
     max_instance_request_concurrency = 25
   }
-  depends_on = [google_project_service.run, terraform_data.binary]
+  depends_on = [google_project_service.run, module.prebuild_binaries]
 }
 
 ## IAM Bindings

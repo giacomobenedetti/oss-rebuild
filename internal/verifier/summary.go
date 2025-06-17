@@ -49,7 +49,20 @@ func SummarizeArtifacts(ctx context.Context, metadata rebuild.LocatableAssetStor
 	if resp.StatusCode != 200 {
 		return rb, up, errors.Wrap(errors.New(resp.Status), "fetching upstream artifact")
 	}
-	err = archive.StabilizeWithOpts(up.StabilizedHash, io.TeeReader(resp.Body, up.Hash), t.ArchiveType(), archive.StabilizeOpts{Stabilizers: stabilizers})
+
+	file, err := metadata.Writer(ctx, rebuild.DebugUpstreamAsset.For(t))
+	if err != nil {
+		return rb, up, errors.Wrap(err, "failed to create file in assetStore")
+	}
+
+	// Copy the file content to the assetStore
+	//_, err := io.Copy(file, resp.Body)
+	tee := io.TeeReader(resp.Body, file)
+	// if _, err = io.CopyBuffer(file, resp.Body, make([]byte, 32*1024)); err != nil {
+	// 	return rb, up, errors.Wrap(err, "failed to write file to assetStore")
+	// }
+
+	err = archive.StabilizeWithOpts(up.StabilizedHash, io.TeeReader(tee, up.Hash), t.ArchiveType(), archive.StabilizeOpts{Stabilizers: stabilizers})
 	checkClose(resp.Body)
 	if err != nil {
 		return rb, up, errors.Wrap(err, "fingerprinting upstream")

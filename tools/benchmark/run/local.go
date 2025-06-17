@@ -7,8 +7,16 @@ import (
 	"bytes"
 	"context"
 	"crypto"
-	"github.com/go-git/go-billy/v5/memfs"
-	"github.com/go-git/go-git/v5/storage/memory"
+	"io"
+	"log"
+	"net/http"
+
+	cratesreg "github.com/google/oss-rebuild/pkg/registry/cratesio"
+	debianreg "github.com/google/oss-rebuild/pkg/registry/debian"
+	npmreg "github.com/google/oss-rebuild/pkg/registry/npm"
+	pypireg "github.com/google/oss-rebuild/pkg/registry/pypi"
+
+	"github.com/google/oss-rebuild/internal/api/inferenceservice"
 	"github.com/google/oss-rebuild/internal/cache"
 	internalExecutor "github.com/google/oss-rebuild/internal/executor"
 	"github.com/google/oss-rebuild/internal/httpx"
@@ -20,14 +28,7 @@ import (
 	"github.com/google/oss-rebuild/pkg/rebuild/rebuild"
 	"github.com/google/oss-rebuild/pkg/rebuild/schema"
 	"github.com/google/oss-rebuild/pkg/rebuild/stability"
-	cratesreg "github.com/google/oss-rebuild/pkg/registry/cratesio"
-	debianreg "github.com/google/oss-rebuild/pkg/registry/debian"
-	npmreg "github.com/google/oss-rebuild/pkg/registry/npm"
-	pypireg "github.com/google/oss-rebuild/pkg/registry/pypi"
 	"github.com/pkg/errors"
-	"io"
-	"log"
-	"net/http"
 )
 
 type localExecutionService struct {
@@ -92,7 +93,7 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 		}
 	}
 	verdict.Target.Artifact = t.Artifact
-	strategy, err := s.infer(ctx, t, mux)
+	strategy, err := s.infer(ctx, t)
 	if err != nil {
 		verdict.Message = []string{err.Error()}
 		return verdict, nil
@@ -103,7 +104,7 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 		verdict.Message = []string{err.Error()}
 	} else if comparisonOutcome, err = compare(ctx, t, s.store, mux); err != nil {
 		verdict.Message = []string{err.Error()}
-	} else if comparisonOutcome != nil {
+	} else {
 		for _, outcome := range comparisonOutcome {
 			verdict.Message = append(verdict.Message, outcome.Error())
 		}
@@ -112,40 +113,68 @@ func (s *localExecutionService) RebuildPackage(ctx context.Context, req schema.R
 	return verdict, nil
 }
 
-func (s *localExecutionService) infer(ctx context.Context, t rebuild.Target, mux rebuild.RegistryMux) (rebuild.Strategy, error) {
-	mem := memory.NewStorage()
-	fs := memfs.New()
-	defer func() error {
-		err := fs.Remove(fs.Root())
+func (s *localExecutionService) infer(ctx context.Context, t rebuild.Target) (rebuild.Strategy, error) {
+	// mem := memory.NewStorage()
+	// // fs := memfs.New()
+	// fs := osfs.New("/tmp/oss-rebuild-artifacts")
+
+	// repoPath := fmt.Sprintf("/tmp/oss-rebuild/%s/%s/%s", t.Ecosystem, t.Package, t.Version)
+	// fs := osfs.New(repoPath)
+
+	// // Optionally, clean up the repo directory after inference to save space.
+	// defer func() {
+	// 	if fs != nil {
+	// 		_ = fs.Remove("/")
+	// 	}
+	// 	fs = nil
+	// }()
+
+	// // Use a memory-backed git object storage (this is usually small).
+	// mem := gitx.NewStorage()
+	// var rebuilder rebuild.Rebuilder
+	// switch t.Ecosystem {
+	// case rebuild.NPM:
+	// 	rebuilder = npm.Rebuilder{}
+	// case rebuild.PyPI:
+	// 	rebuilder = pypi.Rebuilder{}
+	// case rebuild.CratesIO:
+	// 	rebuilder = cratesio.Rebuilder{}
+	// case rebuild.Debian:
+	// 	rebuilder = debian.Rebuilder{}
+	// case rebuild.Maven:
+	// 	return nil, errors.New("maven not implemented")
+	// default:
+	// 	return nil, errors.New("unsupported ecosystem")
+	// }
+	// repo, err := rebuilder.InferRepo(ctx, t, mux)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// rcfg, err := rebuilder.CloneRepo(ctx, t, repo, fs, mem)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	strategy, err := inferenceservice.Infer(ctx, schema.InferenceRequest{
+		Ecosystem: t.Ecosystem,
+		Package:   t.Package,
+		Version:   t.Version,
+		Artifact:  t.Artifact,
+	}, &inferenceservice.InferDeps{
+		HTTPClient: http.DefaultClient,
+		GitCache:   nil,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to infer strategy")
+	} else {
+		strat, err := strategy.Strategy()
 		if err != nil {
-			return errors.Wrap(err, "removing the root filesystem to clean memory")
+			return nil, errors.Wrap(err, "failed to get strategy from inference result")
 		}
-		return nil
-	}()
-	var rebuilder rebuild.Rebuilder
-	switch t.Ecosystem {
-	case rebuild.NPM:
-		rebuilder = npm.Rebuilder{}
-	case rebuild.PyPI:
-		rebuilder = pypi.Rebuilder{}
-	case rebuild.CratesIO:
-		rebuilder = cratesio.Rebuilder{}
-	case rebuild.Debian:
-		rebuilder = debian.Rebuilder{}
-	case rebuild.Maven:
-		return nil, errors.New("maven not implemented")
-	default:
-		return nil, errors.New("unsupported ecosystem")
+		return strat, nil
 	}
-	repo, err := rebuilder.InferRepo(ctx, t, mux)
-	if err != nil {
-		return nil, err
-	}
-	rcfg, err := rebuilder.CloneRepo(ctx, t, repo, fs, mem)
-	if err != nil {
-		return nil, err
-	}
-	return rebuilder.InferStrategy(ctx, t, mux, &rcfg, nil)
+
+	// return rebuilder.InferStrategy(ctx, t, mux, &rcfg, nil)
 }
 
 type buildOpts struct {
@@ -270,33 +299,42 @@ func compare(ctx context.Context, t rebuild.Target, store rebuild.LocatableAsset
 	}
 
 	// TODO: Code duplication with SummarizeArtifacts
-	req, _ := http.NewRequest(http.MethodGet, upSummary.URI, nil)
-	resp, err := rebuild.DoContext(ctx, req)
-	if err != nil {
-		return nil, errors.Wrap(err, "fetching upstream artifact")
-	}
-	if resp.StatusCode != 200 {
-		return nil, errors.Wrap(errors.New(resp.Status), "fetching upstream artifact")
-	}
+	// req, _ := http.NewRequest(http.MethodGet, upSummary.URI, nil)
+	// resp, err := rebuild.DoContext(ctx, req)
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "fetching upstream artifact")
+	// }
+	// if resp.StatusCode != 200 {
+	// 	return nil, errors.Wrap(errors.New(resp.Status), "fetching upstream artifact")
+	// }
 
-	file, err := store.Writer(ctx, rebuild.DebugUpstreamAsset.For(t))
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create file in assetStore")
-	}
+	// file, err := store.Writer(ctx, rebuild.DebugUpstreamAsset.For(t))
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "failed to create file in assetStore")
+	// }
 
-	// Copy the file content to the assetStore
-	//_, err := io.Copy(file, resp.Body)
-	if _, err = io.CopyBuffer(file, resp.Body, make([]byte, 32*1024)); err != nil {
-		return nil, errors.Wrap(err, "failed to write file to assetStore")
-	}
+	// // Copy the file content to the assetStore
+	// //_, err := io.Copy(file, resp.Body)
+	// if _, err = io.CopyBuffer(file, resp.Body, make([]byte, 32*1024)); err != nil {
+	// 	return nil, errors.Wrap(err, "failed to write file to assetStore")
+	// }
 
 	rb, up, err := rebuild.Summarize(ctx, t, rebuild.RebuildAsset.For(t), rebuild.DebugUpstreamAsset.For(t), store)
+	if err != nil {
+		return nil, errors.Wrap(err, "summarizing rebuild and upstream artifacts")
+	}
+
 	verdict, err := pypi.CompareTwoFiles(rb, up)
+	if err != nil {
+		return nil, errors.Wrap(err, "comparing files")
+	}
 	return verdict, nil
 }
 
 func (s *localExecutionService) SmoketestPackage(ctx context.Context, req schema.SmoketestRequest) (*schema.SmoketestResponse, error) {
 	//var verdicts []schema.Verdict
+
+	regClient := httpx.NewCachedClient(http.DefaultClient, &cache.CoalescingMemoryCache{})
 
 	for _, ver := range req.Versions {
 
@@ -305,7 +343,7 @@ func (s *localExecutionService) SmoketestPackage(ctx context.Context, req schema
 			Package:   req.Package,
 			Version:   ver,
 			ID:        req.ID,
-			RegClient: httpx.NewCachedClient(http.DefaultClient, &cache.CoalescingMemoryCache{}),
+			RegClient: regClient,
 		}
 		//regClient := httpx.NewCachedClient(http.DefaultClient, &cache.CoalescingMemoryCache{})
 		reb, err := s.RebuildPackage(ctx, rebReq)

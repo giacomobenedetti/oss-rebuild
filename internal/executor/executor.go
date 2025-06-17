@@ -5,11 +5,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/google/oss-rebuild/internal/textwrap"
-	"github.com/pkg/errors"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/google/oss-rebuild/internal/textwrap"
+	"github.com/pkg/errors"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -79,10 +80,15 @@ WORKDIR %s
 	}
 
 	// Start the container
+
+	resources := container.Resources{
+		Memory: 2 * 1024 * 1024 * 1024, // 2GB memory limit
+	}
+
 	resp, err := d.client.ContainerCreate(ctx, &container.Config{
 		Image: imageName,
 		Cmd:   []string{"tail", "-f", "/dev/null"}, // Keep the container running
-	}, nil, nil, nil, "")
+	}, &container.HostConfig{Resources: resources}, nil, nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to create Docker container: %v", err)
 	}

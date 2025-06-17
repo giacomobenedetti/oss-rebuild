@@ -476,7 +476,7 @@ var runBenchmark = &cobra.Command{
 					log.Println(errors.Wrap(err, "writing rebuild to rundex"))
 				}
 			}
-			verdicts = append(verdicts, v)
+			// verdicts = append(verdicts, v)
 		}
 		bar.Finish()
 		sort.Slice(verdicts, func(i, j int) bool {

@@ -4,11 +4,15 @@
 package run
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +23,52 @@ import (
 	"github.com/google/oss-rebuild/tools/benchmark"
 	"github.com/pkg/errors"
 )
+
+// MemInfo holds physical memory information
+type MemInfo struct {
+	Total     uint64 // Total physical memory in bytes
+	Available uint64 // Available physical memory in bytes
+	Used      uint64 // Used physical memory in bytes
+}
+
+// Returns available memory in bytes (best effort, works on Linux and macOS)
+func getAvailableMemory() (*MemInfo, error) {
+	file, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	memInfo := &MemInfo{}
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		key := strings.TrimSuffix(fields[0], ":")
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+
+		// Convert from KB to bytes
+		value *= 1024
+
+		switch key {
+		case "MemTotal":
+			memInfo.Total = value
+		case "MemAvailable":
+			memInfo.Available = value
+		}
+	}
+
+	memInfo.Used = memInfo.Total - memInfo.Available
+	return memInfo, scanner.Err()
+}
 
 // ExecutionService defines the contract for services that can execute rebuilds or smoketests.
 type ExecutionService interface {
@@ -49,6 +99,28 @@ func (s *remoteExecutionService) RebuildPackage(ctx context.Context, req schema.
 }
 
 func (s *remoteExecutionService) SmoketestPackage(ctx context.Context, req schema.SmoketestRequest) (*schema.SmoketestResponse, error) {
+	const minFreeMemory = 3 * 1024 * 1024 * 1024 // 3GB
+
+	// Memory check before processing
+	for {
+		avail, err := getAvailableMemory()
+		if err != nil {
+			log.Printf("Error getting available memory: %v", err)
+			break
+		}
+		for avail.Available < minFreeMemory {
+			log.Printf("Low memory detected (%d bytes free), pausing new builds...", avail)
+			time.Sleep(10 * time.Second)
+			avail, err = getAvailableMemory()
+			if err != nil {
+				log.Printf("Error getting available memory: %v", err)
+				break
+			}
+			// continue
+		}
+		break
+	}
+
 	return s.smoketestStub(ctx, req)
 }
 
@@ -92,6 +164,7 @@ func (ex *executor) Process(ctx context.Context, out chan schema.Verdict, packag
 		go func() {
 			defer wg.Done()
 			for p := range jobs {
+
 				ex.Worker.ProcessOne(ctx, p, out)
 			}
 		}()
@@ -165,19 +238,6 @@ func (w *smoketestWorker) Setup(ctx context.Context) {
 }
 
 func (w *smoketestWorker) ProcessOne(ctx context.Context, p benchmark.Package, out chan schema.Verdict) {
-	ch := w.limiters[p.Ecosystem]
-	fmt.Printf("Channel %p: cap=%d, len=%d\n", ch, cap(ch), len(ch))
-
-	// Try non-blocking read first
-	select {
-	case val := <-ch:
-		fmt.Printf("Got value immediately: %v\n", val)
-		// Continue with val
-	default:
-		fmt.Println("Would block - this shouldn't happen if channel has data!")
-		// Now try the blocking read
-		<-ch
-	}
 	<-w.limiters[p.Ecosystem]
 	req := schema.SmoketestRequest{
 		Ecosystem: rebuild.Ecosystem(p.Ecosystem),

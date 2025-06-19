@@ -325,7 +325,7 @@ func TestDoCloudBuild(t *testing.T) {
 			},
 			CancelOperationFunc: func(op *cloudbuild.Operation) error { return nil },
 		}
-		opts := RemoteOptions{Project: "test-project", LogsBucket: "test-logs-bucket", BuildServiceAccount: "test-service-account", PrebuildConfig: PrebuildConfig{Bucket: "test-bootstrap"}}
+		opts := RemoteOptions{Project: "test-project", LogsBucket: "test-logs-bucket", BuildServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com", PrebuildConfig: PrebuildConfig{Bucket: "test-bootstrap"}}
 		target := Target{Ecosystem: NPM, Package: "pkg", Version: "version", Artifact: "pkg-version.tgz"}
 		bi := &BuildInfo{Target: target}
 		err := doCloudBuild(context.Background(), client, beforeBuild, opts, bi)
@@ -362,14 +362,14 @@ func TestMakeBuild(t *testing.T) {
 			dockerfile: "FROM docker.io/library/alpine:3.19",
 			opts: RemoteOptions{
 				LogsBucket:          "test-logs-bucket",
-				BuildServiceAccount: "test-service-account",
+				BuildServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				PrebuildConfig:      PrebuildConfig{Bucket: "test-bootstrap"},
 				RemoteMetadataStore: NewFilesystemAssetStore(memfs.New()),
 			},
 			expected: &cloudbuild.Build{
 				LogsBucket:     "test-logs-bucket",
 				Options:        &cloudbuild.BuildOptions{Logging: "GCS_ONLY"},
-				ServiceAccount: "test-service-account",
+				ServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				Steps: []*cloudbuild.BuildStep{
 					{
 						Name: "gcr.io/cloud-builders/docker",
@@ -408,7 +408,7 @@ chmod +x gsutil_writeonly
 			dockerfile: "FROM docker.io/library/alpine:3.19",
 			opts: RemoteOptions{
 				LogsBucket:          "test-logs-bucket",
-				BuildServiceAccount: "test-service-account",
+				BuildServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				PrebuildConfig:      PrebuildConfig{Bucket: "test-bootstrap"},
 				RemoteMetadataStore: NewFilesystemAssetStore(memfs.New()),
 				UseSyscallMonitor:   true,
@@ -416,7 +416,7 @@ chmod +x gsutil_writeonly
 			expected: &cloudbuild.Build{
 				LogsBucket:     "test-logs-bucket",
 				Options:        &cloudbuild.BuildOptions{Logging: "GCS_ONLY"},
-				ServiceAccount: "test-service-account",
+				ServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				Steps: []*cloudbuild.BuildStep{
 					{
 						Name: "gcr.io/cloud-builders/docker",
@@ -463,7 +463,7 @@ chmod +x gsutil_writeonly
 			dockerfile: "FROM docker.io/library/alpine:3.19",
 			opts: RemoteOptions{
 				LogsBucket:          "test-logs-bucket",
-				BuildServiceAccount: "test-service-account",
+				BuildServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				PrebuildConfig:      PrebuildConfig{Bucket: "test-bootstrap", Auth: true},
 				RemoteMetadataStore: NewFilesystemAssetStore(memfs.New()),
 				Project:             "test-project",
@@ -471,14 +471,14 @@ chmod +x gsutil_writeonly
 			expected: &cloudbuild.Build{
 				LogsBucket:     "test-logs-bucket",
 				Options:        &cloudbuild.BuildOptions{Logging: "GCS_ONLY"},
-				ServiceAccount: "test-service-account",
+				ServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				Steps: []*cloudbuild.BuildStep{
 					{
 						Name: "gcr.io/cloud-builders/docker",
 						Script: `#!/usr/bin/env bash
 set -eux
 echo 'Starting rebuild for {Ecosystem:npm Package:pkg Version:version Artifact:pkg-version.tgz}'
-apt install -y jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/builder-remote@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
+apt install -y jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/test-service-account@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
 (printf "Authorization: Bearer "; cat /tmp/token) > /tmp/auth_header
 cat <<'EOS' | docker buildx build --secret id=auth_header,src=/tmp/auth_header --tag=img -
 FROM docker.io/library/alpine:3.19
@@ -497,7 +497,7 @@ docker run --name=container img
 					{
 						Name: "docker.io/library/alpine:3.19",
 						Script: `set -eux
-apk add curl jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/builder-remote@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
+apk add curl jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/test-service-account@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
 (printf "Authorization: Bearer "; cat /tmp/token) > /tmp/auth_header
 curl -O -H @/tmp/auth_header https://test-bootstrap.storage.googleapis.com/gsutil_writeonly
 chmod +x gsutil_writeonly
@@ -514,7 +514,7 @@ chmod +x gsutil_writeonly
 			dockerfile: "FROM docker.io/library/alpine:3.19",
 			opts: RemoteOptions{
 				LogsBucket:          "test-logs-bucket",
-				BuildServiceAccount: "test-service-account",
+				BuildServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				PrebuildConfig:      PrebuildConfig{Bucket: "test-bootstrap"},
 				RemoteMetadataStore: NewFilesystemAssetStore(memfs.New()),
 				UseNetworkProxy:     true,
@@ -522,7 +522,7 @@ chmod +x gsutil_writeonly
 			expected: &cloudbuild.Build{
 				LogsBucket:     "test-logs-bucket",
 				Options:        &cloudbuild.BuildOptions{Logging: "GCS_ONLY"},
-				ServiceAccount: "test-service-account",
+				ServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				Steps: []*cloudbuild.BuildStep{
 					{
 						Name: "gcr.io/cloud-builders/docker",
@@ -558,14 +558,15 @@ docker exec --privileged build /bin/sh -euxc '
 	iptables -t nat -A OUTPUT -p tcp --dport 80 -j DNAT --to-destination '$proxyIP':3128
 	iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination '$proxyIP':3129
 '
+cat <<'EOS' | sed "s|^RUN|RUN --mount=type=bind,from=certs,dst=/etc/ssl/certs --mount=type=secret,id=PROXYCERT,env=PIP_CERT --mount=type=secret,id=PROXYCERT,env=CURL_CA_BUNDLE --mount=type=secret,id=PROXYCERT,env=NODE_EXTRA_CA_CERTS --mount=type=secret,id=PROXYCERT,env=CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE --mount=type=secret,id=PROXYCERT,env=NIX_SSL_CERT_FILE|" > /Dockerfile
+FROM docker.io/library/alpine:3.19
+EOS
+docker cp /Dockerfile build:/Dockerfile
 docker exec build /bin/sh -euxc '
 	curl http://proxy:3127/cert | tee /etc/ssl/certs/proxy.crt >> /etc/ssl/certs/ca-certificates.crt
 	export DOCKER_HOST=tcp://proxy:3130 PROXYCERT=/etc/ssl/certs/proxy.crt
 	docker buildx create --name proxied --bootstrap --driver docker-container --driver-opt network=container:build
-	cat <<EOS | sed "s|^RUN|RUN --mount=type=bind,from=certs,dst=/etc/ssl/certs --mount=type=secret,id=PROXYCERT,env=PIP_CERT --mount=type=secret,id=PROXYCERT,env=CURL_CA_BUNDLE --mount=type=secret,id=PROXYCERT,env=NODE_EXTRA_CA_CERTS --mount=type=secret,id=PROXYCERT,env=CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE --mount=type=secret,id=PROXYCERT,env=NIX_SSL_CERT_FILE|" | \
-		docker buildx build --builder proxied --build-context certs=/etc/ssl/certs --secret id=PROXYCERT --load --tag=img -
-FROM docker.io/library/alpine:3.19
-EOS
+	cat /Dockerfile | docker buildx build --builder proxied --build-context certs=/etc/ssl/certs --secret id=PROXYCERT --load --tag=img -
 	docker run --name=container img
 '
 curl http://proxy:3127/summary > /workspace/netlog.json
@@ -598,7 +599,7 @@ chmod +x gsutil_writeonly
 			dockerfile: "FROM docker.io/library/alpine:3.19",
 			opts: RemoteOptions{
 				LogsBucket:          "test-logs-bucket",
-				BuildServiceAccount: "test-service-account",
+				BuildServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				PrebuildConfig:      PrebuildConfig{Bucket: "test-bootstrap", Dir: "v0.0.0-202501010000-feeddeadbeef00"},
 				RemoteMetadataStore: NewFilesystemAssetStore(memfs.New()),
 				UseNetworkProxy:     true,
@@ -606,7 +607,7 @@ chmod +x gsutil_writeonly
 			expected: &cloudbuild.Build{
 				LogsBucket:     "test-logs-bucket",
 				Options:        &cloudbuild.BuildOptions{Logging: "GCS_ONLY"},
-				ServiceAccount: "test-service-account",
+				ServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				Steps: []*cloudbuild.BuildStep{
 					{
 						Name: "gcr.io/cloud-builders/docker",
@@ -642,14 +643,15 @@ docker exec --privileged build /bin/sh -euxc '
 	iptables -t nat -A OUTPUT -p tcp --dport 80 -j DNAT --to-destination '$proxyIP':3128
 	iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination '$proxyIP':3129
 '
+cat <<'EOS' | sed "s|^RUN|RUN --mount=type=bind,from=certs,dst=/etc/ssl/certs --mount=type=secret,id=PROXYCERT,env=PIP_CERT --mount=type=secret,id=PROXYCERT,env=CURL_CA_BUNDLE --mount=type=secret,id=PROXYCERT,env=NODE_EXTRA_CA_CERTS --mount=type=secret,id=PROXYCERT,env=CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE --mount=type=secret,id=PROXYCERT,env=NIX_SSL_CERT_FILE|" > /Dockerfile
+FROM docker.io/library/alpine:3.19
+EOS
+docker cp /Dockerfile build:/Dockerfile
 docker exec build /bin/sh -euxc '
 	curl http://proxy:3127/cert | tee /etc/ssl/certs/proxy.crt >> /etc/ssl/certs/ca-certificates.crt
 	export DOCKER_HOST=tcp://proxy:3130 PROXYCERT=/etc/ssl/certs/proxy.crt
 	docker buildx create --name proxied --bootstrap --driver docker-container --driver-opt network=container:build
-	cat <<EOS | sed "s|^RUN|RUN --mount=type=bind,from=certs,dst=/etc/ssl/certs --mount=type=secret,id=PROXYCERT,env=PIP_CERT --mount=type=secret,id=PROXYCERT,env=CURL_CA_BUNDLE --mount=type=secret,id=PROXYCERT,env=NODE_EXTRA_CA_CERTS --mount=type=secret,id=PROXYCERT,env=CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE --mount=type=secret,id=PROXYCERT,env=NIX_SSL_CERT_FILE|" | \
-		docker buildx build --builder proxied --build-context certs=/etc/ssl/certs --secret id=PROXYCERT --load --tag=img -
-FROM docker.io/library/alpine:3.19
-EOS
+	cat /Dockerfile | docker buildx build --builder proxied --build-context certs=/etc/ssl/certs --secret id=PROXYCERT --load --tag=img -
 	docker run --name=container img
 '
 curl http://proxy:3127/summary > /workspace/netlog.json
@@ -682,7 +684,7 @@ chmod +x gsutil_writeonly
 			dockerfile: "FROM docker.io/library/alpine:3.19",
 			opts: RemoteOptions{
 				LogsBucket:          "test-logs-bucket",
-				BuildServiceAccount: "test-service-account",
+				BuildServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				PrebuildConfig:      PrebuildConfig{Bucket: "test-bootstrap", Auth: true},
 				RemoteMetadataStore: NewFilesystemAssetStore(memfs.New()),
 				UseNetworkProxy:     true,
@@ -691,13 +693,13 @@ chmod +x gsutil_writeonly
 			expected: &cloudbuild.Build{
 				LogsBucket:     "test-logs-bucket",
 				Options:        &cloudbuild.BuildOptions{Logging: "GCS_ONLY"},
-				ServiceAccount: "test-service-account",
+				ServiceAccount: "projects/test-project/serviceAccounts/test-service-account@test-project.iam.gserviceaccount.com",
 				Steps: []*cloudbuild.BuildStep{
 					{
 						Name: "gcr.io/cloud-builders/docker",
 						Script: `set -eux
 echo 'Starting rebuild for {Ecosystem:npm Package:pkg Version:version Artifact:pkg-version.tgz}'
-apt install -y jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/builder-remote@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
+apt install -y jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/test-service-account@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
 (printf "Authorization: Bearer "; cat /tmp/token) > /tmp/auth_header
 curl -O -H @/tmp/auth_header https://test-bootstrap.storage.googleapis.com/proxy
 chmod +x proxy
@@ -730,14 +732,15 @@ docker exec --privileged build /bin/sh -euxc '
 	iptables -t nat -A OUTPUT -p tcp --dport 80 -j DNAT --to-destination '$proxyIP':3128
 	iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination '$proxyIP':3129
 '
+cat <<'EOS' | sed "s|^RUN|RUN --mount=type=bind,from=certs,dst=/etc/ssl/certs --mount=type=secret,id=PROXYCERT,env=PIP_CERT --mount=type=secret,id=PROXYCERT,env=CURL_CA_BUNDLE --mount=type=secret,id=PROXYCERT,env=NODE_EXTRA_CA_CERTS --mount=type=secret,id=PROXYCERT,env=CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE --mount=type=secret,id=PROXYCERT,env=NIX_SSL_CERT_FILE|" > /Dockerfile
+FROM docker.io/library/alpine:3.19
+EOS
+docker cp /Dockerfile build:/Dockerfile
 docker exec build /bin/sh -euxc '
 	curl http://proxy:3127/cert | tee /etc/ssl/certs/proxy.crt >> /etc/ssl/certs/ca-certificates.crt
 	export DOCKER_HOST=tcp://proxy:3130 PROXYCERT=/etc/ssl/certs/proxy.crt HEADER
 	docker buildx create --name proxied --bootstrap --driver docker-container --driver-opt network=container:build
-	cat <<EOS | sed "s|^RUN|RUN --mount=type=bind,from=certs,dst=/etc/ssl/certs --mount=type=secret,id=PROXYCERT,env=PIP_CERT --mount=type=secret,id=PROXYCERT,env=CURL_CA_BUNDLE --mount=type=secret,id=PROXYCERT,env=NODE_EXTRA_CA_CERTS --mount=type=secret,id=PROXYCERT,env=CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE --mount=type=secret,id=PROXYCERT,env=NIX_SSL_CERT_FILE|" | \
-		docker buildx build --builder proxied --build-context certs=/etc/ssl/certs --secret id=PROXYCERT --secret id=auth_header,env=HEADER --load --tag=img -
-FROM docker.io/library/alpine:3.19
-EOS
+	cat /Dockerfile | docker buildx build --builder proxied --build-context certs=/etc/ssl/certs --secret id=PROXYCERT --secret id=auth_header,env=HEADER --load --tag=img -
 	docker run --name=container img
 '
 curl http://proxy:3127/summary > /workspace/netlog.json
@@ -754,7 +757,7 @@ curl http://proxy:3127/summary > /workspace/netlog.json
 					{
 						Name: "docker.io/library/alpine:3.19",
 						Script: `set -eux
-apk add curl jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/builder-remote@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
+apk add curl jq && curl -H Metadata-Flavor:Google http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/test-service-account@test-project.iam.gserviceaccount.com/token | jq .access_token > /tmp/token
 (printf "Authorization: Bearer "; cat /tmp/token) > /tmp/auth_header
 curl -O -H @/tmp/auth_header https://test-bootstrap.storage.googleapis.com/gsutil_writeonly
 chmod +x gsutil_writeonly

@@ -145,18 +145,19 @@ func findGitRef(pkg string, version string, rcfg *rebuild.RepoConfig) (string, e
 
 // FindPureWheel returns the pure wheel artifact from the given version's releases.
 func FindPureWheel(artifacts []pypireg.Artifact) (*pypireg.Artifact, error) {
-	var sdistFallback *pypireg.Artifact
 	for _, r := range artifacts {
-		switch {
-		case strings.HasSuffix(r.Filename, "none-any.whl"):
+		if strings.HasSuffix(r.Filename, "none-any.whl") {
 			return &r, nil
-
-		case strings.HasSuffix(r.Filename, ".tar.gz"):
-			sdistFallback = &r
 		}
 	}
-	if sdistFallback != nil {
-		return sdistFallback, nil
+	return nil, fs.ErrNotExist
+}
+
+func FindSourceDist(artifacts []pypireg.Artifact) (*pypireg.Artifact, error) {
+	for _, r := range artifacts {
+		if strings.HasSuffix(r.Filename, ".tar.gz") {
+			return &r, nil
+		}
 	}
 	return nil, fs.ErrNotExist
 }
@@ -228,8 +229,13 @@ func (Rebuilder) InferStrategy(ctx context.Context, t rebuild.Target, mux rebuil
 		}
 		dir = rcfg.Dir
 	}
+
 	a, err := FindPureWheel(release.Artifacts)
 	if err != nil {
+		a, err = FindSourceDist(release.Artifacts)
+		if err != nil {
+
+		}
 		return cfg, errors.Wrap(err, "finding pure wheel")
 	}
 	log.Printf("Downloading artifact: %s", a.URL)
@@ -292,13 +298,12 @@ func (Rebuilder) InferStrategy(ctx context.Context, t rebuild.Target, mux rebuil
 		}
 	}
 	if strings.HasSuffix(a.Filename, ".tar.gz") {
-		return &SourceDistBuild{
+		return &PyPISdistBuild{
 			Location: rebuild.Location{
 				Repo: rcfg.URI,
 				Dir:  dir,
 				Ref:  ref,
 			},
-			Requirements: reqs,
 		}, nil
 	} else {
 		return &PureWheelBuild{

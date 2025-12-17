@@ -19,8 +19,8 @@ type PureWheelBuild struct {
 	RegistryTime  time.Time `json:"registry_time" yaml:"registry_time,omitempty"`
 }
 
-// SourceDistBuild includes elements for building an sdist.
-type SourceDistBuild struct {
+// PyPISdistBuild includes elements for building an sdist.
+type PyPISdistBuild struct {
 	rebuild.Location
 	PythonVersion string    `json:"python_version" yaml:"python_version"`
 	Requirements  []string  `json:"requirements"`
@@ -28,7 +28,7 @@ type SourceDistBuild struct {
 }
 
 var _ rebuild.Strategy = &PureWheelBuild{}
-var _ rebuild.Strategy = &SourceDistBuild{}
+var _ rebuild.Strategy = &PyPISdistBuild{}
 
 func (b *PureWheelBuild) ToWorkflow() *rebuild.WorkflowStrategy {
 	var registryTime string
@@ -65,7 +65,7 @@ func (b *PureWheelBuild) ToWorkflow() *rebuild.WorkflowStrategy {
 	}
 }
 
-func (b *SourceDistBuild) ToWorkflow() *rebuild.WorkflowStrategy {
+func (b *PyPISdistBuild) ToWorkflow() *rebuild.WorkflowStrategy {
 	var registryTime string
 	if !b.RegistryTime.IsZero() {
 		registryTime = b.RegistryTime.Format(time.RFC3339)
@@ -106,7 +106,7 @@ func (b *PureWheelBuild) GenerateFor(t rebuild.Target, be rebuild.BuildEnv) (reb
 }
 
 // GenerateFor generates the instructions for a SourceDistBuild.
-func (b *SourceDistBuild) GenerateFor(t rebuild.Target, be rebuild.BuildEnv) (rebuild.Instructions, error) {
+func (b *PyPISdistBuild) GenerateFor(t rebuild.Target, be rebuild.BuildEnv) (rebuild.Instructions, error) {
 	return b.ToWorkflow().GenerateFor(t, be)
 }
 

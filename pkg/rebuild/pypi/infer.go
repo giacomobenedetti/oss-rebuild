@@ -234,9 +234,8 @@ func (Rebuilder) InferStrategy(ctx context.Context, t rebuild.Target, mux rebuil
 	if err != nil {
 		a, err = FindSourceDist(release.Artifacts)
 		if err != nil {
-
+			return cfg, errors.Wrap(err, "finding pure wheel or source distribution")
 		}
-		return cfg, errors.Wrap(err, "finding pure wheel")
 	}
 	log.Printf("Downloading artifact: %s", a.URL)
 	r, err := mux.PyPI.Artifact(ctx, name, version, a.Filename)
@@ -304,6 +303,7 @@ func (Rebuilder) InferStrategy(ctx context.Context, t rebuild.Target, mux rebuil
 				Dir:  dir,
 				Ref:  ref,
 			},
+			Requirements: reqs,
 		}, nil
 	} else {
 		return &PureWheelBuild{

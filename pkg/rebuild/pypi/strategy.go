@@ -21,6 +21,7 @@ type PureWheelBuild struct {
 // PyPISdistBuild includes elements for building an sdist.
 type PyPISdistBuild struct {
 	rebuild.Location
+	Requirements []string  `json:"requirements"`
 	RegistryTime time.Time `json:"registry_time" yaml:"registry_time,omitempty"`
 }
 
@@ -75,6 +76,7 @@ func (b *PyPISdistBuild) ToWorkflow() *rebuild.WorkflowStrategy {
 			Uses: "pypi/deps/basic",
 			With: map[string]string{
 				"registryTime": registryTime,
+				"requirements": flow.MustToJSON(b.Requirements),
 				"venv":         "/deps",
 			},
 		}},
@@ -180,12 +182,12 @@ var toolkit = []*flow.Tool{
 	{
 		Name: "pypi/build/sdist",
 		Steps: []flow.Step{
-			{
-				Uses: "pypi/install-build-essentials",
-			},
+			// {
+			// 	Uses: "pypi/install-build-essentials",
+			// },
 			{
 				Runs: textwrap.Dedent(`
-				{{.With.locator}}python3 -m build --sdist {{if and (ne .With.dir ".") (ne .With.dir "")}} {{.With.dir}}{{end}}`)[1:],
+				{{.With.locator}}python3 -m build --sdist -n{{if and (ne .With.dir ".") (ne .With.dir "")}} {{.With.dir}}{{end}}`)[1:],
 				Needs: []string{"python3"},
 			}},
 	},

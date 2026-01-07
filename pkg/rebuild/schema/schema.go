@@ -46,6 +46,8 @@ func NewStrategyOneOf(s rebuild.Strategy) StrategyOneOf {
 		oneof.LocationHint = t
 	case *pypi.PureWheelBuild:
 		oneof.PureWheelBuild = t
+	case *pypi.PyPISdistBuild:
+		oneof.SourceDistBuild = t
 	case *maven.MavenBuild:
 		oneof.MavenBuild = t
 	case *maven.GradleBuild:
@@ -80,6 +82,10 @@ func (oneof *StrategyOneOf) Strategy() (rebuild.Strategy, error) {
 		if oneof.PureWheelBuild != nil {
 			num++
 			s = oneof.PureWheelBuild
+		}
+		if oneof.SourceDistBuild != nil {
+			num++
+			s = oneof.SourceDistBuild
 		}
 		if oneof.NPMPackBuild != nil {
 			num++
